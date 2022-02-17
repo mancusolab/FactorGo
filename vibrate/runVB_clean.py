@@ -285,11 +285,7 @@ def pW_main(Z_m, Z_var, Mu_m, Etau, Ealpha, B, sampleN, sampleN_sqrt):
     # minus mu
     n, _ = Z_m.shape
     Bres = B / sampleN_sqrt[:, None] - Mu_m  # nxp
-    tmp = jnp.einsum(
-        "n,nik->ik",
-        sampleN,
-        (Z_var + batched_outer(Z_m, Z_m)),
-    )
+    tmp = Z_var @ sampleN + (Z_m.T * sampleN) @ Z_m
     pW_V = jnp.linalg.inv(Etau * tmp + jnp.diag(Ealpha))
     pW_m = jnp.einsum(
         "ik,np,nk->pi", Etau * pW_V, Bres, Z_m * sampleN[:, None], optimize="greedy"
