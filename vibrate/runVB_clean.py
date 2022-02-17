@@ -226,12 +226,13 @@ def batched_broadcast(A, B):
 
 def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt):
     # import pdb; pdb.set_trace()
-    zzt = Z_var + batched_outer(Z_m, Z_m)  # nxkxk
     ZWt = Z_m @ W_m.T  # nxp
 
     term1 = jnp.sum(B * B, axis=1)  # BtVinvB (n,)
     term2 = sampleN * jnp.sum(Mu_var + jnp.square(Mu_m))  # (n,)
-    term3 = sampleN * batched_trace(WtW @ zzt)  # trace(Z_var @ WtW)
+    term3 = sampleN * (
+        batched_trace(WtW @ Z_var) + jnp.einsum("ni,ik,nk->n", Z_m, WtW, Z_m)
+    )
     term4_5 = 2 * sampleN * jnp.sum((Mu_m - B / sampleN_sqrt[:, None]) * ZWt, axis=1)
     term6 = 2 * jnp.dot(B * sampleN_sqrt[:, None], Mu_m)
 
