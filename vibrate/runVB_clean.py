@@ -23,12 +23,14 @@ import numpy as np
 from jax import random, jit
 
 import jax.profiler
+
 # server = jax.profiler.start_server(9999)
 # jax.profiler.start_trace("/testres/tensorboard")
 
 # disable jax preallocation or set the % of memory for preallocation
 # os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='false'
 # os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION']='.10'
+
 
 def get_logger(name, path=None):
     logger = logging.getLogger(name)
@@ -148,12 +150,12 @@ def read_data(beta_z_path, N_path, var_path=None):
     # drop the subject id, convert str into numeric
     df_beta_z = df_beta_z.astype("float")
 
-    if (var_path is not None):
+    if var_path is not None:
         df_var = pd.read_csv(var_path, delimiter="\t", header=0)
         df_var = df_var.drop(labels=[snp_col], axis=1).T
     else:
         n, p = df_beta_z.shape
-        df_var = jnp.ones((n,p))
+        df_var = jnp.ones((n, p))
 
     # read sample size file and rename col
     df_N = pd.read_csv(N_path, delimiter="\t", header=0)
@@ -222,28 +224,19 @@ def batched_broadcast(A, B):
     return jnp.einsum("i,ij->ij", A, B)
 
 
-# def calc_MeanQuadForm(
-#     W_m, W_var, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
-# ):
-def calc_MeanQuadForm(
-    W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
-):
+def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt):
     # import pdb; pdb.set_trace()
-    # WtW = jnp.sum(W_var + batched_outer(W_m, W_m), axis=0)
     zzt = Z_var + batched_outer(Z_m, Z_m)  # nxkxk
     ZWt = Z_m @ W_m.T  # nxp
-    # BV = B * Vinv  # nxp
+
     term1 = jnp.sum(B * B, axis=1)  # BtVinvB (n,)
     term2 = sampleN * jnp.sum(Mu_var + jnp.square(Mu_m))  # (n,)
-    term3 = sampleN * batched_trace(WtW @ zzt)  # trace(Z_var @ WtVinvW)
-    term4_5 = (
-        2 * sampleN * jnp.sum((Mu_m - B / sampleN_sqrt[:, None]) * ZWt, axis=1)
-    )
+    term3 = sampleN * batched_trace(WtW @ zzt)  # trace(Z_var @ WtW)
+    term4_5 = 2 * sampleN * jnp.sum((Mu_m - B / sampleN_sqrt[:, None]) * ZWt, axis=1)
     term6 = 2 * jnp.dot(B * sampleN_sqrt[:, None], Mu_m)
 
-    mean_quad_form = jnp.sum(
-        term1 + term2 + term3 + term4_5 - term6
-    )
+    mean_quad_form = jnp.sum(term1 + term2 + term3 + term4_5 - term6)
+
     return mean_quad_form
 
 
@@ -253,16 +246,17 @@ def logdet(M):
 
 ## Update moments
 @jit
-def pZ_main(W_m, W_var, Mu_m, Etau, B, sampleN, sampleN_sqrt):
+def pZ_main(W_m, EWtW, Mu_m, Etau, B, sampleN, sampleN_sqrt):
     # pZ_m: (n,k)
     # pZ_var: (n,k,k)
     n, p = B.shape
     _, k = W_m.shape
+
     # nxkxk
-    WtVinvW = batched_WtVinvW(W_m, W_var, sampleN)
     pZ_var = jnpla.inv(
-        Etau * WtVinvW + jnp.identity(k)
+        ((Etau * EWtW)[:, :, np.newaxis] * sampleN).swapaxes(-1, 0) + np.eye(k)
     )  # kxk
+
     # minus mu in shape (p,1)
     Bres = jnp.reshape((B / sampleN_sqrt[:, None] - Mu_m) * Etau, (n, p, 1))
     pZ_m = (pZ_var @ W_m.T @ Bres).squeeze(-1) * sampleN[:, None]
@@ -289,7 +283,7 @@ def pMu_main(W_m, Z_m, Etau, B, sampleN, sampleN_sqrt):
 def pW_main(Z_m, Z_var, Mu_m, Etau, Ealpha, B, sampleN, sampleN_sqrt):
     # minus mu
     n, _ = Z_m.shape
-    Bres = (B / sampleN_sqrt[:, None] - Mu_m)  # nxp
+    Bres = B / sampleN_sqrt[:, None] - Mu_m  # nxp
     tmp = jnp.einsum(
         "n,nik->ik",
         sampleN,
@@ -304,12 +298,10 @@ def pW_main(Z_m, Z_var, Mu_m, Etau, Ealpha, B, sampleN, sampleN_sqrt):
 
 
 @jit
-# def palpha_main(W_m, W_var):
 def palpha_main(WtW, p):
     # p, k = W_m.shape
 
     phalpha_a = HyperParams.halpha_a + p * 0.5
-    # WtW = jnp.sum(W_var + batched_outer(W_m, W_m), axis=0)
     phalpha_b = HyperParams.halpha_b + 0.5 * jnp.diagonal(WtW)
 
     Ealpha = phalpha_a / phalpha_b
@@ -387,16 +379,11 @@ def KL_Qtau(pa, pb):
 
 # calculate R2 for ordered factors
 @jit
-# def R2(W_m, Z_m, Etau, B, Vinv, sampleN_sqrt):
 def R2(W_m, Z_m, Etau, B, sampleN_sqrt):
     n, p = B.shape
-    # BV = B * Vinv
 
-    # tss = jnp.trace((BV * Etau) @ B.T)
-    tss = jnp.trace((B * Etau) @ B.T)
+    tss = jnp.sum(B * B) * Etau
     resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
-    # resid = B.T - batched_outer(W_m.T, Z_m.T)
-    # sse = batched_trace(jnp.swapaxes(resid * Vinv.T * Etau, -2, -1) @ resid)
     sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid)
 
     r2 = 1.0 - sse / tss
@@ -442,7 +429,7 @@ def main(args):
     argp.add_argument("beta_z_path")
     argp.add_argument("N_path")
     argp.add_argument(
-        "-var-path",
+        "--var-path",
         default=None,
         help="Add SE^2 of variants to calculate Z score",
     )
@@ -510,7 +497,7 @@ def main(args):
 
     # convert to numpy/device-array (n,p)
     B = jnp.array(B)
-    Vinv = 1/jnp.array(V)
+    Vinv = 1 / jnp.array(V)
 
     # convert to Z score summary stats
     if args.var_path:
@@ -533,6 +520,7 @@ def main(args):
     # set initializers
     log.info("Initalizing mean parameters.")
     (W_m, W_var, _, _, Mu_m, Ealpha, Etau) = get_init(key_init, B, k)  # seed = 1
+    EWtW = p * W_var + W_m.T @ W_m
     log.info("Completed initalization.")
 
     # reshape for inference
@@ -550,18 +538,20 @@ def main(args):
 
         # import pdb; pdb.set_trace()
         # Z: nxk, nxkxk
-        Z_m, Z_var = pZ_main(W_m, W_var, Mu_m, Etau, B, sampleN, sampleN_sqrt)
+        Z_m, Z_var = pZ_main(W_m, EWtW, Mu_m, Etau, B, sampleN, sampleN_sqrt)
+
         # Mu: (p,), (p,)
         Mu_m, Mu_var = pMu_main(W_m, Z_m, Etau, B, sampleN, sampleN_sqrt)
+
         # W: pxk, kxk
-        W_m, W_var = pW_main(
-            Z_m, Z_var, Mu_m, Etau, Ealpha, B, sampleN, sampleN_sqrt
-        )
-        WtW = jnp.sum(W_var + batched_outer(W_m, W_m), axis=0)
-        phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(WtW, p_snps)
+        W_m, W_var = pW_main(Z_m, Z_var, Mu_m, Etau, Ealpha, B, sampleN, sampleN_sqrt)
+        EWtW = p * W_var + W_m.T @ W_m
+        phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p_snps)
+
         mean_quad = calc_MeanQuadForm(
-            W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
+            W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
         )
+
         phtau_a, phtau_b, Etau, Elog_tau = ptau_main(B, mean_quad)
 
         check_elbo = elbo(
@@ -622,6 +612,7 @@ def main(args):
     # jax.profiler.save_device_memory_profile("testmemory.prof")
 
     return 0
+
 
 # jax.profiler.stop_trace()
 
