@@ -224,12 +224,10 @@ def batched_broadcast(A, B):
 
 def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt):
     # import pdb; pdb.set_trace()
-    zzt = Z_var + batched_outer(Z_m, Z_m)  # nxkxk
+    # zzt = Z_var + batched_outer(Z_m, Z_m)  # nxkxk
     ZWt = Z_m @ W_m.T  # nxp
-    # BV = B * Vinv  # nxp
     term1 = jnp.sum(B * B, axis=1)  # BtVinvB (n,)
     term2 = sampleN * jnp.sum(Mu_var + jnp.square(Mu_m))  # (n,)
-    # term3 = sampleN * batched_trace(WtW @ zzt)  # trace(Z_var @ WtVinvW)
     term3 = sampleN * (
         batched_trace(WtW @ Z_var) + jnp.einsum("ni,ik,nk->n", Z_m, WtW, Z_m)
     )
@@ -507,14 +505,19 @@ def main(args):
 
         # import pdb; pdb.set_trace()
         # Z: nxk, nxkxk
+        log.info(f"itr =  {idx}| update Z")
         Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
         # Mu: (p,), (p,)
+        log.info(f"itr =  {idx}| update Mu")
         Mu_m, Mu_var = pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt)
         # W: pxk, kxk
+        log.info(f"itr =  {idx}| update W")
         W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt)
         EWtW = p_snps * W_var + W_m.T @ W_m
+        log.info(f"itr =  {idx}| update alpha")
         phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p_snps)
         mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
+        log.info(f"itr =  {idx}| update tau")
         phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n_studies, p_snps)
 
         check_elbo = elbo(
@@ -573,7 +576,7 @@ def main(args):
 
     log.info("Finished. Goodbye.")
 
-    W_m.block_until_ready()
+    check_elbo.block_until_ready()
     jax.profiler.save_device_memory_profile("testres/testmemory.prof")
     # # jax.profiler.stop_trace()
 
