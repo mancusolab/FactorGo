@@ -196,15 +196,14 @@ def get_init(key_init, n, p, k, dat, log, init_opt="random"):
     if init_opt == "svd":
         U, D, Vh = jnpla.svd(dat, full_matrices=False)
         W_m_init = Vh[0:k, :].T
-        # Z_m_init = U[:, 0:k] * D[0:k]
+        Z_m_init = U[:, 0:k] * D[0:k]
         log.info("Initialize W and Z using tsvd.")
     else:
         key_init, key_w = random.split(key_init)
         W_m_init = random.normal(key_w, shape=w_shape)
 
         key_init, key_z = random.split(key_init)
-        Z_m_init = random.normal(key_z, shape=z_shape)
-
+        # Z_m_init = random.normal(key_z, shape=z_shape)
 
     Mu_m = jnp.zeros((p,))
 
@@ -339,52 +338,43 @@ def palpha_main(WtW, p):
 
     return AlphaState(phalpha_a, phalpha_b, Ealpha, Elog_alpha)
 
-# @jit
-def pjoint_main(pZ_m, pZ_var, pW_m, pW_var, pMu_m, phalpha_a, phalpha_b, Etau, sampleN):
-    # jointly transform latent space
+@jit
+def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     n, k = pZ_m.shape
     p, _ = pW_m.shape
 
-    # Auxillary parameter
-    # 1) remove bias
+    ## 1) find b
     psi_n = Etau * p * pW_var
     # # !! this can be simplified
     Psi = jnp.broadcast_to(psi_n[jnp.newaxis, ...], (n, k, k)) * sampleN.reshape((n,1,1)) + jnp.eye(k)
     Psi_Z = (Psi @ pZ_m.reshape((n,k,1))).squeeze(-1)
     b = jnpla.inv(jnp.sum(Psi, axis=0)) @ jnp.sum(Psi_Z, axis=0)
+    b = jnp.zeros((k,))
 
-    # set b=0
-    # b = jnp.zeros((k,))
+    ## 2) find R
+    EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m.T @ pZ_m
+    Lambda2, U = jnpla.eig(EZtZ/n)
+    U_weight = U * jnp.sqrt(Lambda2)
 
+    quad_W = U_weight.T @ EWtW @ U_weight
+    _, V = jnpla.eig(quad_W)
+
+    R = U_weight @ V
+    R_inv = V.T /jnp.sqrt(Lambda2) @ U.T
+
+    return b, R, R_inv
+
+@jit
+def pjoint_main(pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sampleN, b, R, R_inv):
+    # jointly transform latent space
+    n, k = pZ_m.shape
+    p, _ = pW_m.shape
+
+    ## 1) remove bias
     pZ_m_center = pZ_m - b
     pMu_m_center = pMu_m + pW_m @ b
 
-    # # 2) find R: (kxk) and R^-1
-    # # import pdb; pdb.set_trace()
-    EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m_center.T @ pZ_m_center # (k,k)
-    EWtW = p*pW_var + pW_m.T @ pW_m  # (k,k)
-    
-    # jnpla return complex128 output for 64-bit input; eigenvector on clumn of output
-    # numpy.linalg.eig return complex64 for 32-bit input
-    Lambda2, U = jnpla.eig(EZtZ/n)
-    U_weight = U * jnp.sqrt(Lambda2)
-    # order columns by eigenvalue
-    # U_order = jnp.argsort(Lambda2)
-    # U_weight = U_weight[:, U_order]
-    
-    quad_W = U_weight.T @ EWtW @ U_weight
-    D, V = jnpla.eig(quad_W)
-    # quad_W/p is used in their github script
-    
-    # V_order = jnp.argsort(D)
-    # V = V[:, V_order]
-    
-    R = U_weight @ V
-    # R = jnp.eye(k)
-    R_inv = jnpla.inv(R)
-    # R_inv = V.T @ jnp.diag((1/jnp.sqrt(Lambda2)) @ U.T
-    
-    # rotate each row of pW_m (pxk)
+    ## 2) rotate: each row of pW_m (pxk) and each row of pZ_m (nxk)
     pW_m_rot = (R.T @ pW_m.T).T
     pW_var_rot = R.T @ pW_var @ R
 
@@ -395,7 +385,7 @@ def pjoint_main(pZ_m, pZ_var, pW_m, pW_var, pMu_m, phalpha_a, phalpha_b, Etau, s
     EWtW_q = R.T @ EWtW @ R
     phalpha_b_rot = HyperParams.halpha_b + 0.5 * jnp.diag(EWtW_q)
     Ealpha_rot = phalpha_a / phalpha_b_rot
-    Elog_alpha_rot = scp.digamma(phalpha_b_rot.real) - jnp.log(phalpha_b_rot.real)
+    Elog_alpha_rot = scp.digamma(phalpha_a.real) - jnp.log(phalpha_b_rot.real)
 
     return JointState(
         pZ_m_rot,
@@ -473,20 +463,24 @@ def KL_Qtau(pa, pb):
     return kl_qtau
 
 
-# calculate R2 for ordered factors
-@jit
+# calculate R2 for ordered factors: exausted memory
+# @jit
 def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
     # import pdb; pdb.set_trace()
     n, p = B.shape
-    _, k = Z_m.shape 
-    
+    _, k = Z_m.shape
+
     tss = jnp.sum(B * B) * Etau
+    # pxk, nxk,
+    # resid = B.T - W_m @ (Z_m * sampleN_sqrt[:, jnp.newaxis]).T
+    # sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid2)
+
     # resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
-    # sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid)
-    # 
+    # sse = Etau * jnp.sum((resid * resid))
+
     # r2 = 1.0 - sse / tss
-    
-    ## save memory space:
+
+    # ## save memory space:
     sse = jnp.zeros((k,))
     for i in range(n):
         WZ = W_m * Z_m[i] * sampleN_sqrt[i] # pxk
@@ -520,6 +514,7 @@ def elbo(
     n, p = B.shape
 
     pD = 0.5 * (n * p * Elog_tau - Etau * mean_quad)
+
     kl_qw = KL_QW(W_m, W_var, Ealpha, Elog_alpha)
     kl_qz = KL_QZ(Z_m, Z_var)
     kl_qmu = KL_QMu(Mu_m, Mu_var)
@@ -580,6 +575,11 @@ def main(args):
         help="remove scalar N from model, i.e. set all N==1",
     )
     argp.add_argument(
+        "--noaux",
+        action="store_true",
+        help="remove aux parameter (slow version)",
+    )
+    argp.add_argument(
         "--rate",
         default=250,
         type=int,
@@ -627,18 +627,17 @@ def main(args):
     # set optionas for stopping rule
     options = Options(args.elbo_tol, args.tau_tol, args.max_iter)
 
-    # set 5 hyperparameters
+    # set 5 hyperparameters: otherwise use default 1e-3
     if args.hyper is not None:
         HyperParams.halpha_a = float(args.hyper[0])
         HyperParams.halpha_b = float(args.hyper[1])
         HyperParams.htau_a = float(args.hyper[2])
         HyperParams.htau_b = float(args.hyper[3])
         HyperParams.hbeta = float(args.hyper[4])
-        log.info(f"set parameters {HyperParams.halpha_a},{HyperParams.halpha_b},{HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta} ")
+    log.info(f"set parameters {HyperParams.halpha_a},{HyperParams.halpha_b},{HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta} ")
 
     # set initializers
     log.info("Initalizing mean parameters.")
-    # (W_m, W_var, Z_m, Z_var, Mu_m, Ealpha, Etau) = get_init(key_init, n_studies, p_snps, k, B, log, args.init_factor)
     (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(key_init, n_studies, p_snps, k, B, log, args.init_factor)
     EWtW = p_snps * W_var + W_m.T @ W_m
     phalpha_a = HyperParams.halpha_a
@@ -647,7 +646,6 @@ def main(args):
 
     f_finfo = jnp.finfo(float)  ## Machine limits for floating point types.
     oelbo, delbo = f_finfo.min, f_finfo.max
-    # oelbo_rot, delbo_rot = f_finfo.min, f_finfo.max # for debug
     otau, dtau = 1000, 1000  ## initial value for delta tau
 
     log.info(
@@ -655,21 +653,23 @@ def main(args):
     )
     RATE = args.rate #250  # print per 250 iterations
     for idx in range(options.max_iter):
-        # if (idx < args.start_trans):
 
-        # log.info(f"itr =  {idx}| update Z")
         Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
-        # log.info(f"itr =  {idx}| update Mu")
         Mu_m, Mu_var = pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt)
-        # log.info(f"itr =  {idx}| update W")
         W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt)
-
         EWtW = p_snps * W_var + W_m.T @ W_m
-        # log.info(f"itr =  {idx}| update alpha")
+
         phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p_snps)
 
+        # find aux params b and R:
+        if args.noaux:
+            pass
+        else:
+            b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
+            Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv)
+            EWtW = p_snps * W_var + W_m.T @ W_m
+
         mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
-        # log.info(f"itr =  {idx}| update tau")
         phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n_studies, p_snps)
 
         check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt  = elbo(
@@ -686,34 +686,11 @@ def main(args):
             # W_m.block_until_ready()
             # jax.profiler.save_device_memory_profile(f"testres/testmemory{idx}.prof")
 
-        # if (idx >= args.start_trans):
-        #     # import pdb; pdb.set_trace()
-        #     Z_m, Z_var, W_m, W_var, Mu_m, phalpha_a, phalpha_b, Ealpha, Elog_alpha = pjoint_main(B, Z_m, Z_var, W_m, W_var, Mu_m, phalpha_a, phalpha_b, Etau, sampleN)
-        #     EWtW = p_snps * W_var + W_m.T @ W_m
-        #     mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
-        #     phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n_studies, p_snps)
-            # check_elbo_rot, pD_rot, kl_qw_rot, kl_qz_rot, kl_qmu_rot, kl_qa_rot, kl_qt_rot = elbo(
-            # W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,B,mean_quad
-            # )
-        #
-        #     delbo_rot = check_elbo_rot - oelbo_rot
-        #     oelbo_rot = check_elbo_rot
-        #     log.info(
-        #         f"After rot: itr =  {idx} | Elbo = {check_elbo_rot} | deltaElbo = {delbo_rot} | Tau = {Etau}| pD = {pD_rot}|kl_qw={kl_qw_rot}|kl_qz={kl_qz_rot}|kl_qmu={kl_qmu_rot}|kl_qa={kl_qa_rot}|kl_qt={kl_qt_rot}"
-        #     )
-
         dtau = Etau - otau
         otau = Etau
 
-        if delbo < args.elbo_tol:
+        if jnp.fabs(delbo) < args.elbo_tol:
             break
-
-        # rotate for fast inference
-        if (idx >= args.start_trans):
-            # import pdb; pdb.set_trace()
-            Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(Z_m, Z_var, W_m, W_var, Mu_m, phalpha_a, phalpha_b, Etau, sampleN)
-            # EZtZ = jnp.sum(Z_var, axis=0) + Z_m.T @ Z_m # for debugging 
-            EWtW = p_snps * W_var + W_m.T @ W_m
 
     f_order = jnp.argsort(Ealpha)
     ordered_Z_m = Z_m[:, f_order]
@@ -722,7 +699,7 @@ def main(args):
     r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
     ordered_r2 = r2[f_order]
 
-    f_info = np.column_stack((jnp.arange(k) + 1, jnp.sort(Ealpha), ordered_r2))
+    f_info = np.column_stack((jnp.arange(k) + 1, jnp.sort(Ealpha.real), ordered_r2.real))
 
     log.info(f"Finished inference after {idx} iterations.")
     log.info(f"Final elbo = {check_elbo} and resid precision = {Etau}")
@@ -730,9 +707,9 @@ def main(args):
     log.info(f"Final sorted R2 = {ordered_r2}")
 
     log.info("Writing results.")
-    np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m, fmt="%s", delimiter="\t")
-    # np.savetxt(f"{args.output}.Mu.tsv.gz", Mu_m, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.Mu.tsv.gz", Mu_m.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
 
     log.info("Finished. Goodbye.")
