@@ -94,6 +94,7 @@ class InitParams(NamedTuple):
     Ealpha: jnp.ndarray  # 1d
     Etau: Union[float, jnp.ndarray]  # for scalars
 
+
 class ZState(NamedTuple):
     """simple class to store results of orthogonalization + projection"""
 
@@ -132,6 +133,7 @@ class TauState(NamedTuple):
     Etau: Union[float, jnp.ndarray]
     Elog_tau: Union[float, jnp.ndarray]
 
+
 class JointState(NamedTuple):
     """simple class to store options for Joint update of variables"""
 
@@ -143,6 +145,7 @@ class JointState(NamedTuple):
     phalpha_b: jnp.ndarray
     Ealpha: jnp.ndarray
     Elog_alpha: jnp.ndarray
+
 
 ## read data
 def read_data(z_path, N_path, log, removeN=False):
@@ -174,7 +177,7 @@ def read_data(z_path, N_path, log, removeN=False):
     sampleN_sqrt = jnp.sqrt(sampleN)
 
     if removeN:
-        n,_ = df_z.shape
+        n, _ = df_z.shape
         sampleN = jnp.ones((n,))
         sampleN_sqrt = jnp.ones((n,))
         log.info("Remove N from model, set all N == 1.")
@@ -254,10 +257,11 @@ def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sq
     # import pdb; pdb.set_trace()
     p, _ = W_m.shape
     term1 = jnp.sum(B * B)
-    term2 = jnp.sum(sampleN) * (p*Mu_var + Mu_m.T @ Mu_m)
-    term3 = jnp.sum(sampleN * (
-        batched_trace(WtW @ Z_var) + jnp.einsum("ni,ik,nk->n", Z_m, WtW, Z_m)
-    ))
+    term2 = jnp.sum(sampleN) * (p * Mu_var + Mu_m.T @ Mu_m)
+    term3 = jnp.sum(
+        sampleN
+        * (batched_trace(WtW @ Z_var) + jnp.einsum("ni,ik,nk->n", Z_m, WtW, Z_m))
+    )
     term4 = 2 * jnp.sum((Mu_m.T @ W_m) @ (sampleN[:, jnp.newaxis] * Z_m).T)
     term5 = 2 * jnp.trace(sampleN_sqrt[:, jnp.newaxis] * ((B @ W_m) @ Z_m.T))
     term6 = 2 * jnp.sum((B @ Mu_m) * sampleN_sqrt)
@@ -265,6 +269,7 @@ def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sq
     mean_quad_form = term1 + term2 + term3 + term4 - term5 - term6
 
     return mean_quad_form
+
 
 def logdet(M):
     """
@@ -338,6 +343,7 @@ def palpha_main(WtW, p):
 
     return AlphaState(phalpha_a, phalpha_b, Ealpha, Elog_alpha)
 
+
 @jit
 def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     n, k = pZ_m.shape
@@ -346,26 +352,33 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     ## 1) find b
     psi_n = Etau * p * pW_var
     # # !! this can be simplified
-    Psi = jnp.broadcast_to(psi_n[jnp.newaxis, ...], (n, k, k)) * sampleN.reshape((n,1,1)) + jnp.eye(k)
-    Psi_Z = (Psi @ pZ_m.reshape((n,k,1))).squeeze(-1)
+    Psi = jnp.broadcast_to(psi_n[jnp.newaxis, ...], (n, k, k)) * sampleN.reshape(
+        (n, 1, 1)
+    ) + jnp.eye(k)
+    Psi_Z = (Psi @ pZ_m.reshape((n, k, 1))).squeeze(-1)
     b = jnpla.inv(jnp.sum(Psi, axis=0)) @ jnp.sum(Psi_Z, axis=0)
     b = jnp.zeros((k,))
 
     ## 2) find R
     EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m.T @ pZ_m
-    Lambda2, U = jnpla.eig(EZtZ/n)
+    ## use jnpla.eigh() due to gpu end complains about jnpla.eig()
+    ## the result should be close subject to different ordering
+    Lambda2, U = jnpla.eigh(EZtZ / n, symmetrize_input=False)
     U_weight = U * jnp.sqrt(Lambda2)
 
     quad_W = U_weight.T @ EWtW @ U_weight
-    _, V = jnpla.eig(quad_W)
+    _, V = jnpla.eigh(quad_W, symmetrize_input=False)
 
     R = U_weight @ V
-    R_inv = V.T /jnp.sqrt(Lambda2) @ U.T
+    R_inv = V.T / jnp.sqrt(Lambda2) @ U.T
 
     return b, R, R_inv
 
+
 @jit
-def pjoint_main(pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sampleN, b, R, R_inv):
+def pjoint_main(
+    pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sampleN, b, R, R_inv
+):
     # jointly transform latent space
     n, k = pZ_m.shape
     p, _ = pW_m.shape
@@ -398,6 +411,7 @@ def pjoint_main(pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sample
         Elog_alpha_rot,
     )
 
+
 @jit
 def ptau_main(mean_quad, n, p):
     phtau_a = HyperParams.htau_a + n * p * 0.5
@@ -408,6 +422,26 @@ def ptau_main(mean_quad, n, p):
 
     return TauState(phtau_a, phtau_b, Etau, Elog_tau)
 
+
+## write function to call all updating function
+# @jit
+# def runVB(B, pW_m, pW_var, pEWtW, pMu_m, pEalpha, pEtau, sampleN, sampleN_sqrt, n, p):
+#     Z_m, Z_var = pZ_main(B, pW_m, pEWtW, pMu_m, pEtau, sampleN, sampleN_sqrt)
+#     Mu_m, Mu_var = pMu_main(B, pW_m, Z_m, pEtau, sampleN, sampleN_sqrt)
+#     W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, pEtau, pEalpha, sampleN, sampleN_sqrt)
+#     EWtW = p * W_var + W_m.T @ W_m
+#
+#     phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p)
+#
+#     # find aux params b and R:
+#     b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, pEtau, sampleN)
+#     Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, pEtau, sampleN, b, R, R_inv)
+#     EWtW = p * W_var + W_m.T @ W_m
+#
+#     mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
+#     phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n, p)
+#
+#     return W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,mean_quad
 
 ## ELBO functions
 def KL_QW(W_m, W_var, Ealpha, Elog_alpha):
@@ -463,35 +497,6 @@ def KL_Qtau(pa, pb):
     return kl_qtau
 
 
-# calculate R2 for ordered factors: exausted memory
-# @jit
-def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
-    # import pdb; pdb.set_trace()
-    n, p = B.shape
-    _, k = Z_m.shape
-
-    tss = jnp.sum(B * B) * Etau
-    # pxk, nxk,
-    # resid = B.T - W_m @ (Z_m * sampleN_sqrt[:, jnp.newaxis]).T
-    # sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid2)
-
-    # resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
-    # sse = Etau * jnp.sum((resid * resid))
-
-    # r2 = 1.0 - sse / tss
-
-    # ## save memory space:
-    sse = jnp.zeros((k,))
-    for i in range(n):
-        WZ = W_m * Z_m[i] * sampleN_sqrt[i] # pxk
-        res = B[i][:,None]-WZ # pxk
-        tmp = jnp.sum(res * res, axis=0) # (k,)
-        sse += tmp
-    r2 = 1.0 - sse*Etau/tss
-
-    return r2
-
-
 @jit
 def elbo(
     W_m,
@@ -522,7 +527,43 @@ def elbo(
     kl_qt = KL_Qtau(phtau_a, phtau_b)
     elbo_sum = pD - (kl_qw + kl_qz + kl_qmu + kl_qa + kl_qt)
 
-    return elbo_sum.real, pD.real, kl_qw.real, kl_qz.real, kl_qmu.real, kl_qa.real, kl_qt.real
+    return (
+        elbo_sum.real,
+        pD.real,
+        kl_qw.real,
+        kl_qz.real,
+        kl_qmu.real,
+        kl_qa.real,
+        kl_qt.real,
+    )
+
+
+# calculate R2 for ordered factors: exausted memory
+def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
+    # import pdb; pdb.set_trace()
+    n, p = B.shape
+    _, k = Z_m.shape
+
+    tss = jnp.sum(B * B) * Etau
+    # pxk, nxk,
+    # resid = B.T - W_m @ (Z_m * sampleN_sqrt[:, jnp.newaxis]).T
+    # sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid2)
+
+    # resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
+    # sse = Etau * jnp.sum((resid * resid))
+
+    # r2 = 1.0 - sse / tss
+
+    # ## save memory space:
+    sse = jnp.zeros((k,))
+    for i in range(n):
+        WZ = W_m * Z_m[i] * sampleN_sqrt[i]  # pxk
+        res = B[i][:, None] - WZ  # pxk
+        tmp = jnp.sum(res * res, axis=0)  # (k,)
+        sse += tmp
+    r2 = 1.0 - sse * Etau / tss
+
+    return r2
 
 
 def main(args):
@@ -556,12 +597,6 @@ def main(args):
         default=10000,
         type=int,
         help="Maximum number of iterations to learn parameters",
-    )
-    argp.add_argument(
-        "--start-trans",
-        default=10,
-        type=int,
-        help="Which iteration to start transformation",
     )
     argp.add_argument(
         "--init-factor",
@@ -614,7 +649,9 @@ def main(args):
     key, key_init = random.split(key, 2)  # split into 2 chunk
 
     log.info("Loading GWAS effect size and standard error.")
-    B, sampleN, sampleN_sqrt = read_data(args.Zscore_path, args.N_path, log, args.removeN)
+    B, sampleN, sampleN_sqrt = read_data(
+        args.Zscore_path, args.N_path, log, args.removeN
+    )
     log.info("Finished loading GWAS effect size, sample size and standard error.")
 
     n_studies, p_snps = B.shape
@@ -634,11 +671,15 @@ def main(args):
         HyperParams.htau_a = float(args.hyper[2])
         HyperParams.htau_b = float(args.hyper[3])
         HyperParams.hbeta = float(args.hyper[4])
-    log.info(f"set parameters {HyperParams.halpha_a},{HyperParams.halpha_b},{HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta} ")
+    log.info(
+        f"set parameters {HyperParams.halpha_a},{HyperParams.halpha_b},{HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta} "
+    )
 
     # set initializers
     log.info("Initalizing mean parameters.")
-    (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(key_init, n_studies, p_snps, k, B, log, args.init_factor)
+    (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(
+        key_init, n_studies, p_snps, k, B, log, args.init_factor
+    )
     EWtW = p_snps * W_var + W_m.T @ W_m
     phalpha_a = HyperParams.halpha_a
     phalpha_b = HyperParams.halpha_b
@@ -651,7 +692,7 @@ def main(args):
     log.info(
         "Starting Variational inference (first iter may be slow due to JIT compilation)."
     )
-    RATE = args.rate #250  # print per 250 iterations
+    RATE = args.rate  # 250  # print per 250 iterations
     for idx in range(options.max_iter):
 
         Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
@@ -662,18 +703,37 @@ def main(args):
         phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p_snps)
 
         # find aux params b and R:
-        if args.noaux:
-            pass
-        else:
-            b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
-            Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv)
-            EWtW = p_snps * W_var + W_m.T @ W_m
+        b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
+        Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(
+            Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv
+        )
+        EWtW = p_snps * W_var + W_m.T @ W_m
 
-        mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
+        mean_quad = calc_MeanQuadForm(
+            W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
+        )
         phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n_studies, p_snps)
 
-        check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt  = elbo(
-        W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,B,mean_quad
+        # W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,mean_quad = runVB(
+        # B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n_studies, p_snps
+        # )
+        check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
+            W_m,
+            W_var,
+            Z_m,
+            Z_var,
+            Mu_m,
+            Mu_var,
+            phtau_a,
+            phtau_b,
+            phalpha_a,
+            phalpha_b,
+            Ealpha,
+            Elog_alpha,
+            Etau,
+            Elog_tau,
+            B,
+            mean_quad,
         )
 
         delbo = check_elbo - oelbo
@@ -699,7 +759,9 @@ def main(args):
     r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
     ordered_r2 = r2[f_order]
 
-    f_info = np.column_stack((jnp.arange(k) + 1, jnp.sort(Ealpha.real), ordered_r2.real))
+    f_info = np.column_stack(
+        (jnp.arange(k) + 1, jnp.sort(Ealpha.real), ordered_r2.real)
+    )
 
     log.info(f"Finished inference after {idx} iterations.")
     log.info(f"Final elbo = {check_elbo} and resid precision = {Etau}")
