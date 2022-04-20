@@ -19,7 +19,7 @@ import numpy as np
 
 from jax import random, jit
 
-import jax.profiler
+# import jax.profiler
 
 # server = jax.profiler.start_server(9999)
 # jax.profiler.start_trace("/testres")
@@ -148,7 +148,7 @@ class JointState(NamedTuple):
 
 
 ## read data
-def read_data(z_path, N_path, log, removeN=False):
+def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     """
     input z score summary stats: headers are ["snp", "trait1", "trait2", ..., "traitn"]
     input sample size file: one column of sample size (with header) which has the same order as above
@@ -156,21 +156,22 @@ def read_data(z_path, N_path, log, removeN=False):
 
     # Read dataset (read as data frame)
     df_z = pd.read_csv(z_path, delimiter="\t", header=0)
-
-    # drop the first column (axis = 1)
     snp_col = df_z.columns[0]
+    
+    # drop the first column (axis = 1) and convert to nxp
+    # snp_col = df_z.columns[0]
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
-
-    # convert str into numeric and transpose the data nxp
     df_z = df_z.astype("float").T
-
-    # read sample size file and convert str into numerics
-    df_N = pd.read_csv(N_path, delimiter="\t", header=0)
-    df_N = df_N.astype("float")
+    
+    if scaledat == "True":
+        df_z = df_z.divide(df_z.std())
 
     # convert to numpy/jax device-array (n,p)
     df_z = jnp.array(df_z)
 
+    # read sample size file and convert str into numerics, convert to nxp matrix
+    df_N = pd.read_csv(N_path, delimiter="\t", header=0)
+    df_N = df_N.astype("float")
     # convert sampleN (a file with one column and header)to arrays
     N_col = df_N.columns[0]
     sampleN = df_N[N_col].values
@@ -279,7 +280,7 @@ def logdet(M):
 
 
 ## Update Posterior Moments
-@jit
+# @jit
 def pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt):
     """
     :pZ_m: (n,k) posterior moments
@@ -296,7 +297,7 @@ def pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt):
     return ZState(pZ_m, pZ_var)
 
 
-@jit
+# @jit
 def pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt):
     """
     :pMu_m: (p,)
@@ -311,7 +312,7 @@ def pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt):
     return MuState(pMu_m, pMu_var)
 
 
-@jit
+# @jit
 def pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt):
     """
     :pW_m: pxk
@@ -328,7 +329,7 @@ def pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt):
     return WState(pW_m, pW_V)
 
 
-@jit
+# @jit
 def palpha_main(WtW, p):
     """
     :phalpha_a: shared by all k latent factirs
@@ -344,7 +345,7 @@ def palpha_main(WtW, p):
     return AlphaState(phalpha_a, phalpha_b, Ealpha, Elog_alpha)
 
 
-@jit
+# @jit
 def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     n, k = pZ_m.shape
     p, _ = pW_m.shape
@@ -375,7 +376,7 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     return b, R, R_inv
 
 
-@jit
+# @jit
 def pjoint_main(
     pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sampleN, b, R, R_inv
 ):
@@ -412,7 +413,7 @@ def pjoint_main(
     )
 
 
-@jit
+# @jit
 def ptau_main(mean_quad, n, p):
     phtau_a = HyperParams.htau_a + n * p * 0.5
     phtau_b = 0.5 * mean_quad + HyperParams.htau_b
@@ -424,24 +425,46 @@ def ptau_main(mean_quad, n, p):
 
 
 ## write function to call all updating function
-# @jit
-# def runVB(B, pW_m, pW_var, pEWtW, pMu_m, pEalpha, pEtau, sampleN, sampleN_sqrt, n, p):
-#     Z_m, Z_var = pZ_main(B, pW_m, pEWtW, pMu_m, pEtau, sampleN, sampleN_sqrt)
-#     Mu_m, Mu_var = pMu_main(B, pW_m, Z_m, pEtau, sampleN, sampleN_sqrt)
-#     W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, pEtau, pEalpha, sampleN, sampleN_sqrt)
-#     EWtW = p * W_var + W_m.T @ W_m
-#
-#     phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p)
-#
-#     # find aux params b and R:
-#     b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, pEtau, sampleN)
-#     Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, pEtau, sampleN, b, R, R_inv)
-#     EWtW = p * W_var + W_m.T @ W_m
-#
-#     mean_quad = calc_MeanQuadForm(W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt)
-#     phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n, p)
-#
-#     return W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,mean_quad
+@jit
+def runVB(B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n, p):
+    Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
+    Mu_m, Mu_var = pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt)
+    W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt)
+    EWtW = p * W_var + W_m.T @ W_m
+
+    phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p)
+
+    # find aux params b and R:
+    b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
+    Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(
+        Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv
+    )
+    EWtW = p * W_var + W_m.T @ W_m
+
+    mean_quad = calc_MeanQuadForm(
+        W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
+    )
+    phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n, p)
+
+    return (
+        W_m,
+        W_var,
+        EWtW,
+        Z_m,
+        Z_var,
+        Mu_m,
+        Mu_var,
+        phtau_a,
+        phtau_b,
+        phalpha_a,
+        phalpha_b,
+        Ealpha,
+        Elog_alpha,
+        Etau,
+        Elog_tau,
+        mean_quad,
+    )
+
 
 ## ELBO functions
 def KL_QW(W_m, W_var, Ealpha, Elog_alpha):
@@ -610,6 +633,12 @@ def main(args):
         help="remove scalar N from model, i.e. set all N==1",
     )
     argp.add_argument(
+        "--scaledat",
+        choices=["True", "False"],
+        default="False",
+        help="scale each SNPs effect across traits",
+    )
+    argp.add_argument(
         "--noaux",
         action="store_true",
         help="remove aux parameter (slow version)",
@@ -650,7 +679,7 @@ def main(args):
 
     log.info("Loading GWAS effect size and standard error.")
     B, sampleN, sampleN_sqrt = read_data(
-        args.Zscore_path, args.N_path, log, args.removeN
+        args.Zscore_path, args.N_path, log, args.removeN, args.scaledat
     )
     log.info("Finished loading GWAS effect size, sample size and standard error.")
 
@@ -695,28 +724,36 @@ def main(args):
     RATE = args.rate  # 250  # print per 250 iterations
     for idx in range(options.max_iter):
 
-        Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
-        Mu_m, Mu_var = pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt)
-        W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt)
-        EWtW = p_snps * W_var + W_m.T @ W_m
-
-        phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p_snps)
-
-        # find aux params b and R:
-        b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
-        Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(
-            Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv
+        (
+            W_m,
+            W_var,
+            EWtW,
+            Z_m,
+            Z_var,
+            Mu_m,
+            Mu_var,
+            phtau_a,
+            phtau_b,
+            phalpha_a,
+            phalpha_b,
+            Ealpha,
+            Elog_alpha,
+            Etau,
+            Elog_tau,
+            mean_quad,
+        ) = runVB(
+            B,
+            W_m,
+            W_var,
+            EWtW,
+            Mu_m,
+            Ealpha,
+            Etau,
+            sampleN,
+            sampleN_sqrt,
+            n_studies,
+            p_snps,
         )
-        EWtW = p_snps * W_var + W_m.T @ W_m
-
-        mean_quad = calc_MeanQuadForm(
-            W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
-        )
-        phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n_studies, p_snps)
-
-        # W_m,W_var,Z_m,Z_var,Mu_m,Mu_var,phtau_a,phtau_b,phalpha_a,phalpha_b,Ealpha,Elog_alpha,Etau,Elog_tau,mean_quad = runVB(
-        # B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n_studies, p_snps
-        # )
         check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
             W_m,
             W_var,
