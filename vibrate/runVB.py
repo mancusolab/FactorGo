@@ -157,12 +157,12 @@ def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     # Read dataset (read as data frame)
     df_z = pd.read_csv(z_path, delimiter="\t", header=0)
     snp_col = df_z.columns[0]
-    
+
     # drop the first column (axis = 1) and convert to nxp
     # snp_col = df_z.columns[0]
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
     df_z = df_z.astype("float").T
-    
+
     if scaledat == "True":
         df_z = df_z.divide(df_z.std())
 
@@ -358,7 +358,6 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     ) + jnp.eye(k)
     Psi_Z = (Psi @ pZ_m.reshape((n, k, 1))).squeeze(-1)
     b = jnpla.inv(jnp.sum(Psi, axis=0)) @ jnp.sum(Psi_Z, axis=0)
-    b = jnp.zeros((k,))
 
     ## 2) find R
     EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m.T @ pZ_m
