@@ -157,14 +157,17 @@ def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     # Read dataset (read as data frame)
     df_z = pd.read_csv(z_path, delimiter="\t", header=0)
     snp_col = df_z.columns[0]
-    
+
     # drop the first column (axis = 1) and convert to nxp
     # snp_col = df_z.columns[0]
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
     df_z = df_z.astype("float").T
-    
+
     if scaledat == "True":
+        df_z = df_z.subtract(df_z.mean())
         df_z = df_z.divide(df_z.std())
+    else:
+        pass
 
     # convert to numpy/jax device-array (n,p)
     df_z = jnp.array(df_z)
@@ -358,7 +361,6 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     ) + jnp.eye(k)
     Psi_Z = (Psi @ pZ_m.reshape((n, k, 1))).squeeze(-1)
     b = jnpla.inv(jnp.sum(Psi, axis=0)) @ jnp.sum(Psi_Z, axis=0)
-    b = jnp.zeros((k,))
 
     ## 2) find R
     EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m.T @ pZ_m
@@ -635,7 +637,7 @@ def main(args):
     argp.add_argument(
         "--scaledat",
         choices=["True", "False"],
-        default="False",
+        default="none",
         help="scale each SNPs effect across traits",
     )
     argp.add_argument(
@@ -705,7 +707,7 @@ def main(args):
     )
 
     # set initializers
-    log.info("Initalizing mean parameters.")
+    log.info(f"Initalizing mean parameters with seed {args.seed}.")
     (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(
         key_init, n_studies, p_snps, k, B, log, args.init_factor
     )
@@ -789,15 +791,15 @@ def main(args):
         if jnp.fabs(delbo) < args.elbo_tol:
             break
 
-    f_order = jnp.argsort(Ealpha)
+    r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
+
+    f_order = jnp.argsort(-jnp.abs(r2))
+    ordered_r2 = r2[f_order]
     ordered_Z_m = Z_m[:, f_order]
     ordered_W_m = W_m[:, f_order]
 
-    r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
-    ordered_r2 = r2[f_order]
-
     f_info = np.column_stack(
-        (jnp.arange(k) + 1, jnp.sort(Ealpha.real), ordered_r2.real)
+        (jnp.arange(k) + 1, Ealpha.real[f_order], ordered_r2)
     )
 
     log.info(f"Finished inference after {idx} iterations.")
@@ -807,9 +809,24 @@ def main(args):
 
     log.info("Writing results.")
     np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.Mu.tsv.gz", Mu_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
+
+    ## calculate E(W^2) [unordered]: W_m pxk, W_var kxk
+    EW2 = W_m**2 + jnp.diagonal(W_var)
+    ## calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
+    EZ2 = np.zeros((n_studies,k))
+    Z_m2 = Z_m**2
+    for i in range(n_studies):
+        EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
+
+    ordered_EW2 = EW2[:, f_order]
+    ordered_EZ2 = EZ2[:, f_order]
+    ordered_W_var = jnp.diagonal(W_var)[f_order]
+    
+    np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t")
 
     log.info("Finished. Goodbye.")
 
