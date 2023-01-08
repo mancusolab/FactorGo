@@ -30,7 +30,7 @@
 |
 
 =======
-FactorGO
+FactorGo
 =======
 
 
