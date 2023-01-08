@@ -633,18 +633,19 @@ def main(args):
         "--removeN",
         action="store_true",
         help="remove scalar N from model, i.e. set all N==1",
+        default=False
     )
     argp.add_argument(
         "--scaledat",
         choices=["True", "False"],
-        default="none",
-        help="scale each SNPs effect across traits",
+        default="True",
+        help="scale each SNPs effect across traits (Default=True)",
     )
-    argp.add_argument(
-        "--noaux",
-        action="store_true",
-        help="remove aux parameter (slow version)",
-    )
+    # argp.add_argument(
+    #     "--noaux",
+    #     action="store_true",
+    #     help="remove aux parameter (slow version)",
+    # )
     argp.add_argument(
         "--rate",
         default=250,
@@ -716,14 +717,14 @@ def main(args):
     phalpha_b = HyperParams.halpha_b
     log.info("Completed initalization.")
 
-    f_finfo = jnp.finfo(float)  ## Machine limits for floating point types.
+    f_finfo = jnp.finfo(float)  # Machine limits for floating point types
     oelbo, delbo = f_finfo.min, f_finfo.max
-    otau, dtau = 1000, 1000  ## initial value for delta tau
+    otau, dtau = 1000, 1000  # initial value for delta tau
 
     log.info(
         "Starting Variational inference (first iter may be slow due to JIT compilation)."
     )
-    RATE = args.rate  # 250  # print per 250 iterations
+    RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
         (
@@ -812,9 +813,9 @@ def main(args):
     np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
 
-    ## calculate E(W^2) [unordered]: W_m pxk, W_var kxk
+    # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
     EW2 = W_m**2 + jnp.diagonal(W_var)
-    ## calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
+    # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
     EZ2 = np.zeros((n_studies,k))
     Z_m2 = Z_m**2
     for i in range(n_studies):
