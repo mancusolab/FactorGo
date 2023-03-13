@@ -1,8 +1,8 @@
 =======
-vibrate
+FactorGo
 =======
 
-This is the documentation of **vibrate**.
+This is the documentation of **FactorGo**.
 
 .. note::
 

@@ -3,30 +3,17 @@ import argparse as ap
 import logging
 import os
 import sys
-
 from dataclasses import dataclass
 from typing import NamedTuple, Union
+
+import numpy as np
+import pandas as pd
 
 import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
-import jax.scipy.linalg as jspla
-import jax.scipy.sparse.linalg as la
 import jax.scipy.special as scp
-import pandas as pd
-
-import numpy as np
-
-from jax import random, jit
-
-# import jax.profiler
-
-# server = jax.profiler.start_server(9999)
-# jax.profiler.start_trace("/testres")
-
-# disable jax preallocation or set the % of memory for preallocation
-# os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']='false'
-# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION']='.10'
+from jax import jit, random
 
 
 def get_logger(name, path=None):
@@ -51,7 +38,6 @@ def get_logger(name, path=None):
     return logger
 
 
-## set platform for jax
 def set_platform(platform=None):
     """
     Changes platform to CPU, GPU, or TPU. This utility only takes
@@ -147,11 +133,13 @@ class JointState(NamedTuple):
     Elog_alpha: jnp.ndarray
 
 
-## read data
-def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
+def read_data(z_path, N_path, log, scale=True):
     """
-    input z score summary stats: headers are ["snp", "trait1", "trait2", ..., "traitn"]
-    input sample size file: one column of sample size (with header) which has the same order as above
+    input z score summary stats:
+    headers are ["snp", "trait1", "trait2", ..., "traitn"]
+
+    input sample size file:
+    one column of sample size (with header) which has the same order as above
     """
 
     # Read dataset (read as data frame)
@@ -163,8 +151,10 @@ def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
     df_z = df_z.astype("float").T
 
-    if scaledat == "True":
+    if scale:
+        df_z = df_z.subtract(df_z.mean())
         df_z = df_z.divide(df_z.std())
+        log.info("Scale SNPs to mean zero and sd 1")
 
     # convert to numpy/jax device-array (n,p)
     df_z = jnp.array(df_z)
@@ -177,37 +167,27 @@ def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     sampleN = df_N[N_col].values
     sampleN_sqrt = jnp.sqrt(sampleN)
 
-    if removeN:
-        n, _ = df_z.shape
-        sampleN = jnp.ones((n,))
-        sampleN_sqrt = jnp.ones((n,))
-        log.info("Remove N from model, set all N == 1.")
-
     return df_z, sampleN, sampleN_sqrt
 
 
 def get_init(key_init, n, p, k, dat, log, init_opt="random"):
     """
     initialize matrix for inference
-    We update moments for Z and W first, so here only initiaze parameters required for updating those
+    We update moments for Z and W first,
+    so here only initiaze parameters required for updating those
     """
     w_shape = (p, k)
-    z_shape = (n, k)
 
     W_var_init = jnp.identity(k)
-    # Z_var_init = jnp.broadcast_to(jnp.identity(k)[jnp.newaxis, ...], (n, k, k))
 
     if init_opt == "svd":
         U, D, Vh = jnpla.svd(dat, full_matrices=False)
         W_m_init = Vh[0:k, :].T
-        Z_m_init = U[:, 0:k] * D[0:k]
-        log.info("Initialize W and Z using tsvd.")
+        # Z_m_init = U[:, 0:k] * D[0:k]
+        log.info("Initialize W using tsvd.")
     else:
         key_init, key_w = random.split(key_init)
         W_m_init = random.normal(key_w, shape=w_shape)
-
-        key_init, key_z = random.split(key_init)
-        # Z_m_init = random.normal(key_z, shape=z_shape)
 
     Mu_m = jnp.zeros((p,))
 
@@ -222,16 +202,6 @@ def get_init(key_init, n, p, k, dat, log, init_opt="random"):
         Ealpha=Ealpha_init,
         Etau=Etau,
     )
-
-
-## self defined function to do computation and keep batch
-## note: not using this batched_WtVinvW() anymore b/c SE is dropped
-# def batched_WtVinvW(W_m, W_var, sampleN):
-#     # out WtVinvW: nxkxk
-#     # each kxk only differ by a factor of N
-#     return jnp.einsum(
-#         "n,bik->nik", sampleN, W_var + batched_outer(W_m, W_m), optimize="greedy"
-#     )
 
 
 def batched_outer(A, B):
@@ -279,8 +249,7 @@ def logdet(M):
     return jnpla.slogdet(M)[1]
 
 
-## Update Posterior Moments
-# @jit
+# Update Posterior Moments
 def pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt):
     """
     :pZ_m: (n,k) posterior moments
@@ -350,19 +319,19 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     n, k = pZ_m.shape
     p, _ = pW_m.shape
 
-    ## 1) find b
+    # 1) find b
     psi_n = Etau * p * pW_var
-    # # !! this can be simplified
+    # !! this can be simplified
     Psi = jnp.broadcast_to(psi_n[jnp.newaxis, ...], (n, k, k)) * sampleN.reshape(
         (n, 1, 1)
     ) + jnp.eye(k)
     Psi_Z = (Psi @ pZ_m.reshape((n, k, 1))).squeeze(-1)
     b = jnpla.inv(jnp.sum(Psi, axis=0)) @ jnp.sum(Psi_Z, axis=0)
 
-    ## 2) find R
+    # 2) find R
     EZtZ = jnp.sum(pZ_var, axis=0) + pZ_m.T @ pZ_m
-    ## use jnpla.eigh() due to gpu end complains about jnpla.eig()
-    ## the result should be close subject to different ordering
+    # use jnpla.eigh() due to gpu end complains about jnpla.eig()
+    # the result should be close subject to different ordering
     Lambda2, U = jnpla.eigh(EZtZ / n, symmetrize_input=False)
     U_weight = U * jnp.sqrt(Lambda2)
 
@@ -383,11 +352,11 @@ def pjoint_main(
     n, k = pZ_m.shape
     p, _ = pW_m.shape
 
-    ## 1) remove bias
+    # 1) remove bias
     pZ_m_center = pZ_m - b
     pMu_m_center = pMu_m + pW_m @ b
 
-    ## 2) rotate: each row of pW_m (pxk) and each row of pZ_m (nxk)
+    # 2) rotate: each row of pW_m (pxk) and each row of pZ_m (nxk)
     pW_m_rot = (R.T @ pW_m.T).T
     pW_var_rot = R.T @ pW_var @ R
 
@@ -423,7 +392,7 @@ def ptau_main(mean_quad, n, p):
     return TauState(phtau_a, phtau_b, Etau, Elog_tau)
 
 
-## write function to call all updating function
+# write function to call all updating function
 @jit
 def runVB(B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n, p):
     Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
@@ -465,7 +434,7 @@ def runVB(B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n, p):
     )
 
 
-## ELBO functions
+# ELBO functions
 def KL_QW(W_m, W_var, Ealpha, Elog_alpha):
     p, k = W_m.shape
     kl_qw = -0.5 * jnp.sum(
@@ -573,10 +542,9 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
 
     # resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
     # sse = Etau * jnp.sum((resid * resid))
-
     # r2 = 1.0 - sse / tss
 
-    # ## save memory space:
+    # save memory space:
     sse = jnp.zeros((k,))
     for i in range(n):
         WZ = W_m * Z_m[i] * sampleN_sqrt[i]  # pxk
@@ -603,16 +571,16 @@ def main(args):
     )
     argp.add_argument(
         "--tau-tol",
-        default=1e-6,
+        default=1e-3,
         type=float,
-        help="Tolerance for change in residual variance to halt inference",
+        help="Tolerance for change in tau to halt inference",
     )
     argp.add_argument(
         "--hyper",
         default=None,
         nargs="+",
         type=float,
-        help="Input hyperparameter in order for alpha, tau, and beta; Default hyperparameters are 1e-3",
+        help="Input hyperparameter in order for alpha, tau, and beta",
     )
     argp.add_argument(
         "--max-iter",
@@ -627,20 +595,10 @@ def main(args):
         help="How to initialize the latent factors and weights",
     )
     argp.add_argument(
-        "--removeN",
+        "--scale",
         action="store_true",
-        help="remove scalar N from model, i.e. set all N==1",
-    )
-    argp.add_argument(
-        "--scaledat",
-        choices=["True", "False"],
-        default="False",
-        help="scale each SNPs effect across traits",
-    )
-    argp.add_argument(
-        "--noaux",
-        action="store_true",
-        help="remove aux parameter (slow version)",
+        default=False,
+        help="scale each SNPs effect across traits (Default=True)",
     )
     argp.add_argument(
         "--rate",
@@ -655,7 +613,7 @@ def main(args):
     argp.add_argument("-d", "--debug", action="store_true", default=False)
     argp.add_argument("-v", "--verbose", action="store_true", default=False)
     argp.add_argument(
-        "-o", "--output", type=str, default="VBres", help="Prefix path for output"
+        "-o", "--output", type=str, default="FactorGo", help="Prefix path for output"
     )
 
     args = argp.parse_args(args)  # a list a strings
@@ -677,9 +635,7 @@ def main(args):
     key, key_init = random.split(key, 2)  # split into 2 chunk
 
     log.info("Loading GWAS effect size and standard error.")
-    B, sampleN, sampleN_sqrt = read_data(
-        args.Zscore_path, args.N_path, log, args.removeN, args.scaledat
-    )
+    B, sampleN, sampleN_sqrt = read_data(args.Zscore_path, args.N_path, log, args.scale)
     log.info("Finished loading GWAS effect size, sample size and standard error.")
 
     n_studies, p_snps = B.shape
@@ -700,27 +656,30 @@ def main(args):
         HyperParams.htau_b = float(args.hyper[3])
         HyperParams.hbeta = float(args.hyper[4])
     log.info(
-        f"set parameters {HyperParams.halpha_a},{HyperParams.halpha_b},{HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta} "
+        f"""set parameters
+          {HyperParams.halpha_a},{HyperParams.halpha_b},
+          {HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta}
+        """
     )
 
     # set initializers
-    log.info("Initalizing mean parameters.")
+    log.info(f"Initalizing mean parameters with seed {args.seed}.")
     (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(
         key_init, n_studies, p_snps, k, B, log, args.init_factor
     )
     EWtW = p_snps * W_var + W_m.T @ W_m
-    phalpha_a = HyperParams.halpha_a
-    phalpha_b = HyperParams.halpha_b
+    # phalpha_a = HyperParams.halpha_a
+    # phalpha_b = HyperParams.halpha_b
     log.info("Completed initalization.")
 
-    f_finfo = jnp.finfo(float)  ## Machine limits for floating point types.
+    f_finfo = jnp.finfo(float)  # Machine limits for floating point types
     oelbo, delbo = f_finfo.min, f_finfo.max
-    otau, dtau = 1000, 1000  ## initial value for delta tau
+    # otau, dtau = 1000, 1000  # initial value for delta tau
 
-    log.info(
-        "Starting Variational inference (first iter may be slow due to JIT compilation)."
-    )
-    RATE = args.rate  # 250  # print per 250 iterations
+    log.info("Starting Variational inference.")
+    log.info("first iter may be slow due to JIT compilation).")
+
+    RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
         (
@@ -776,28 +735,23 @@ def main(args):
         oelbo = check_elbo
         if idx % RATE == 0:
             log.info(
-                # f"itr =  {idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {Etau}"
-                f"itr =  {idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {Etau}| pD = {pD}|kl_qw={kl_qw}|kl_qz={kl_qz}|kl_qmu={kl_qmu}|kl_qa={kl_qa}|kl_qt={kl_qt}"
+                f"itr={idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {Etau}"
             )
-            # W_m.block_until_ready()
-            # jax.profiler.save_device_memory_profile(f"testres/testmemory{idx}.prof")
 
-        dtau = Etau - otau
-        otau = Etau
+        # dtau = Etau - otau
+        # otau = Etau
 
         if jnp.fabs(delbo) < args.elbo_tol:
             break
 
-    f_order = jnp.argsort(Ealpha)
+    r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
+
+    f_order = jnp.argsort(-jnp.abs(r2))
+    ordered_r2 = r2[f_order]
     ordered_Z_m = Z_m[:, f_order]
     ordered_W_m = W_m[:, f_order]
 
-    r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
-    ordered_r2 = r2[f_order]
-
-    f_info = np.column_stack(
-        (jnp.arange(k) + 1, jnp.sort(Ealpha.real), ordered_r2.real)
-    )
+    f_info = np.column_stack((jnp.arange(k) + 1, Ealpha.real[f_order], ordered_r2))
 
     log.info(f"Finished inference after {idx} iterations.")
     log.info(f"Final elbo = {check_elbo} and resid precision = {Etau}")
@@ -806,9 +760,26 @@ def main(args):
 
     log.info("Writing results.")
     np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.Mu.tsv.gz", Mu_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
+
+    # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
+    EW2 = W_m ** 2 + jnp.diagonal(W_var)
+    # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
+    EZ2 = np.zeros((n_studies, k))
+    Z_m2 = Z_m ** 2
+    for i in range(n_studies):
+        EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
+
+    ordered_EW2 = EW2[:, f_order]
+    ordered_EZ2 = EZ2[:, f_order]
+    ordered_W_var = jnp.diagonal(W_var)[f_order]
+
+    np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
+    np.savetxt(
+        f"{args.output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
+    )
 
     log.info("Finished. Goodbye.")
 
