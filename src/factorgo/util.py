@@ -3,6 +3,11 @@ import os
 import jax
 
 
+def update_x64(state: bool):
+    jax.config.update("jax_enable_x64", state)
+    return
+
+
 def set_platform(platform=None):
     """
     Changes platform to CPU, GPU, or TPU. This utility only takes

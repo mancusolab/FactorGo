@@ -1,5 +1,4 @@
 import pytest
-
 from vibrate.skeleton import fib, main
 
 __author__ = "Nicholas Mancuso"

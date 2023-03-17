@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+
 from jax import numpy as jnp
 
 
@@ -46,7 +47,5 @@ def write_results(output, EW2, EZ2, W_var, f_order):
     ordered_W_var = jnp.diagonal(W_var)[f_order]
     np.savetxt(f"{output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
-    np.savetxt(
-        f"{output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
-    )
+    np.savetxt(f"{output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t")
     return

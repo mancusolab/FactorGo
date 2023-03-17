@@ -102,16 +102,17 @@ def _main(args):
 
     # setup to use either CPU (default) or GPU
     util.set_platform(args.platform)
-
+    util.update_x64(True)
     # ensure 64bit precision (default use 32bit)
-    jax.config.update("jax_enable_x64", True)
 
     # init key (for jax)
     key = rdm.PRNGKey(args.seed)
     key, key_init = rdm.split(key, 2)  # split into 2 chunk
 
     log.info("Loading GWAS effect size and standard error.")
-    B, sampleN, sampleN_sqrt = io.read_data(args.Zscore_path, args.N_path, log, args.scale)
+    B, sampleN, sampleN_sqrt = io.read_data(
+        args.Zscore_path, args.N_path, log, args.scale
+    )
     log.info("Finished loading GWAS effect size, sample size and standard error.")
 
     n_studies, p_snps = B.shape
@@ -126,21 +127,22 @@ def _main(args):
 
     # set 5 hyperparameters: otherwise use default 1e-3
     if args.hyper is not None:
-        HyperParams.halpha_a = float(args.hyper[0])
-        HyperParams.halpha_b = float(args.hyper[1])
-        HyperParams.htau_a = float(args.hyper[2])
-        HyperParams.htau_b = float(args.hyper[3])
-        HyperParams.hbeta = float(args.hyper[4])
+        infer.HyperParams.halpha_a = float(args.hyper[0])
+        infer.HyperParams.halpha_b = float(args.hyper[1])
+        infer.HyperParams.htau_a = float(args.hyper[2])
+        infer.HyperParams.htau_b = float(args.hyper[3])
+        infer.HyperParams.hbeta = float(args.hyper[4])
 
     log.info(
         f"""set parameters
-          {HyperParams.halpha_a},{HyperParams.halpha_b},
-          {HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta}
+          {infer.HyperParams.halpha_a},{infer.HyperParams.halpha_b},
+          {infer.HyperParams.htau_a},{infer.HyperParams.htau_b}, {infer.HyperParams.hbeta}
         """
     )
 
-    W_m, W_var, Z_m, Z_var, f_info, f_order, ordered_W_m, ordered_Z_m = infer.fit(B, args, k, key_init, log, n_studies,
-                                                                            options, p_snps, sampleN, sampleN_sqrt)
+    W_m, W_var, Z_m, Z_var, f_info, f_order, ordered_W_m, ordered_Z_m = infer.fit(
+        B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_sqrt
+    )
 
     log.info("Writing results.")
     np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")

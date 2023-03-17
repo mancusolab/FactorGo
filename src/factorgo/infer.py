@@ -4,11 +4,8 @@ from typing import NamedTuple, Union
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.special as scp
-from jax import jit, random, numpy as jnp
+from jax import jit, random
 
-__all__ = [
-
-]
 
 @dataclass
 class Options:
@@ -463,7 +460,9 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
     return r2
 
 
-def _inner_fit(B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies, p_snps, sampleN, sampleN_sqrt):
+def _inner_fit(
+    B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies, p_snps, sampleN, sampleN_sqrt
+):
     (
         W_m,
         W_var,
@@ -533,8 +532,19 @@ def fit(B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_
     RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
-        Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo = _inner_fit(B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies,
-                                                               p_snps, sampleN, sampleN_sqrt)
+        Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo = _inner_fit(
+            B,
+            EWtW,
+            Ealpha,
+            Etau,
+            Mu_m,
+            W_m,
+            W_var,
+            n_studies,
+            p_snps,
+            sampleN,
+            sampleN_sqrt,
+        )
 
         delbo = check_elbo - oelbo
         oelbo = check_elbo
