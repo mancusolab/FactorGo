@@ -34,7 +34,7 @@ except ImportError:
     from sphinx import apidoc
 
 output_dir = os.path.join(__location__, "api")
-module_dir = os.path.join(__location__, "../src/FactorGo")
+module_dir = os.path.join(__location__, "../src/factorgo")
 try:
     shutil.rmtree(output_dir)
 except FileNotFoundError:
@@ -87,7 +87,7 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = "FactorGo"
+project = "factorgo"
 copyright = "2022, Nicholas Mancuso"
 
 # The version info for the project you're documenting, acts as replacement for
@@ -229,7 +229,7 @@ html_static_path = ["_static"]
 # html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "FactorGo-doc"
+htmlhelp_basename = "factorgo-doc"
 
 
 # -- Options for LaTeX output ------------------------------------------------
@@ -246,7 +246,7 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-    ("index", "user_guide.tex", "FactorGo Documentation", "Nicholas Mancuso", "manual")
+    ("index", "user_guide.tex", "factorgo Documentation", "Nicholas Mancuso", "manual")
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

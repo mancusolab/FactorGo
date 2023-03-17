@@ -1,55 +1,14 @@
-#! /usr/bin/env python
-import argparse as ap
-import logging
-import os
-import sys
 from dataclasses import dataclass
 from typing import NamedTuple, Union
 
-import numpy as np
-import pandas as pd
-
-import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.special as scp
-from jax import jit, random
+from jax import jit, random, numpy as jnp
 
+__all__ = [
 
-def get_logger(name, path=None):
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        # Prevent logging from propagating to the root logger
-        logger.propagate = 0
-        console = logging.StreamHandler()
-        logger.addHandler(console)
-
-        log_format = "[%(asctime)s - %(levelname)s] %(message)s"
-        date_format = "%Y-%m-%d %H:%M:%S"
-        formatter = logging.Formatter(fmt=log_format, datefmt=date_format)
-        console.setFormatter(formatter)
-
-        if path is not None:
-            disk_log_stream = open("{}.log".format(path), "w")
-            disk_handler = logging.StreamHandler(disk_log_stream)
-            logger.addHandler(disk_handler)
-            disk_handler.setFormatter(formatter)
-
-    return logger
-
-
-def set_platform(platform=None):
-    """
-    Changes platform to CPU, GPU, or TPU. This utility only takes
-    effect at the beginning of your program.
-
-    :param str platform: either 'cpu', 'gpu', or 'tpu'.
-    """
-    if platform is None:
-        platform = os.getenv("JAX_PLATFORM_NAME", "cpu")
-    jax.config.update("jax_platform_name", platform)
-    return
-
+]
 
 @dataclass
 class Options:
@@ -133,43 +92,6 @@ class JointState(NamedTuple):
     Elog_alpha: jnp.ndarray
 
 
-def read_data(z_path, N_path, log, scale=True):
-    """
-    input z score summary stats:
-    headers are ["snp", "trait1", "trait2", ..., "traitn"]
-
-    input sample size file:
-    one column of sample size (with header) which has the same order as above
-    """
-
-    # Read dataset (read as data frame)
-    df_z = pd.read_csv(z_path, delimiter="\t", header=0)
-    snp_col = df_z.columns[0]
-
-    # drop the first column (axis = 1) and convert to nxp
-    # snp_col = df_z.columns[0]
-    df_z.drop(labels=[snp_col], axis=1, inplace=True)
-    df_z = df_z.astype("float").T
-
-    if scale:
-        df_z = df_z.subtract(df_z.mean())
-        df_z = df_z.divide(df_z.std())
-        log.info("Scale SNPs to mean zero and sd 1")
-
-    # convert to numpy/jax device-array (n,p)
-    df_z = jnp.array(df_z)
-
-    # read sample size file and convert str into numerics, convert to nxp matrix
-    df_N = pd.read_csv(N_path, delimiter="\t", header=0)
-    df_N = df_N.astype("float")
-    # convert sampleN (a file with one column and header)to arrays
-    N_col = df_N.columns[0]
-    sampleN = df_N[N_col].values
-    sampleN_sqrt = jnp.sqrt(sampleN)
-
-    return df_z, sampleN, sampleN_sqrt
-
-
 def get_init(key_init, n, p, k, dat, log, init_opt="random"):
     """
     initialize matrix for inference
@@ -204,24 +126,9 @@ def get_init(key_init, n, p, k, dat, log, init_opt="random"):
     )
 
 
-def batched_outer(A, B):
-    # bij,bjk->bik is batched outer product (outer product of each row)
-    return jnp.einsum("bi,bk->bik", A, B)
-
-
-def batched_inner(A, B):
-    # bij,bij->b represents doing batched inner products
-    return jnp.einsum("bij,bij->b", A, B)
-
-
 def batched_trace(A):
     # bii->b represents doing batched trace operations
     return jnp.einsum("bii->b", A)
-
-
-def batched_broadcast(A, B):
-    # each element in A (1d array) times each row of B
-    return jnp.einsum("i,ij->ij", A, B)
 
 
 def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt):
@@ -556,112 +463,59 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
     return r2
 
 
-def main(args):
-    argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("Zscore_path")
-    argp.add_argument("N_path")
-    argp.add_argument(
-        "-k", type=int, default=10
-    )  # "-" must only has one letter like "-k", not like "-knum"
-    argp.add_argument(
-        "--elbo-tol",
-        default=1e-3,
-        type=float,
-        help="Tolerance for change in ELBO to halt inference",
+def _inner_fit(B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies, p_snps, sampleN, sampleN_sqrt):
+    (
+        W_m,
+        W_var,
+        EWtW,
+        Z_m,
+        Z_var,
+        Mu_m,
+        Mu_var,
+        phtau_a,
+        phtau_b,
+        phalpha_a,
+        phalpha_b,
+        Ealpha,
+        Elog_alpha,
+        Etau,
+        Elog_tau,
+        mean_quad,
+    ) = runVB(
+        B,
+        W_m,
+        W_var,
+        EWtW,
+        Mu_m,
+        Ealpha,
+        Etau,
+        sampleN,
+        sampleN_sqrt,
+        n_studies,
+        p_snps,
     )
-    argp.add_argument(
-        "--tau-tol",
-        default=1e-3,
-        type=float,
-        help="Tolerance for change in tau to halt inference",
+    check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
+        W_m,
+        W_var,
+        Z_m,
+        Z_var,
+        Mu_m,
+        Mu_var,
+        phtau_a,
+        phtau_b,
+        phalpha_a,
+        phalpha_b,
+        Ealpha,
+        Elog_alpha,
+        Etau,
+        Elog_tau,
+        B,
+        mean_quad,
     )
-    argp.add_argument(
-        "--hyper",
-        default=None,
-        nargs="+",
-        type=float,
-        help="Input hyperparameter in order for alpha, tau, and beta",
-    )
-    argp.add_argument(
-        "--max-iter",
-        default=10000,
-        type=int,
-        help="Maximum number of iterations to learn parameters",
-    )
-    argp.add_argument(
-        "--init-factor",
-        choices=["random", "svd", "zero"],
-        default="random",
-        help="How to initialize the latent factors and weights",
-    )
-    argp.add_argument(
-        "--scale",
-        action="store_true",
-        default=False,
-        help="scale each SNPs effect across traits (Default=True)",
-    )
-    argp.add_argument(
-        "--rate",
-        default=250,
-        type=int,
-        help="Rate of printing elbo info; default is printing per 250 iters",
-    )
-    argp.add_argument("-p", "--platform", choices=["cpu", "gpu"], default="cpu")
-    argp.add_argument(
-        "-s", "--seed", type=int, default=123456789, help="Seed for randomization."
-    )
-    argp.add_argument("-d", "--debug", action="store_true", default=False)
-    argp.add_argument("-v", "--verbose", action="store_true", default=False)
-    argp.add_argument(
-        "-o", "--output", type=str, default="FactorGo", help="Prefix path for output"
-    )
+    return Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo
 
-    args = argp.parse_args(args)  # a list a strings
 
-    log = get_logger(__name__, args.output)
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-    else:
-        log.setLevel(logging.INFO)
-
-    # setup to use either CPU (default) or GPU
-    set_platform(args.platform)
-
-    # ensure 64bit precision (default use 32bit)
-    jax.config.update("jax_enable_x64", True)
-
-    # init key (for jax)
-    key = random.PRNGKey(args.seed)
-    key, key_init = random.split(key, 2)  # split into 2 chunk
-
-    log.info("Loading GWAS effect size and standard error.")
-    B, sampleN, sampleN_sqrt = read_data(args.Zscore_path, args.N_path, log, args.scale)
-    log.info("Finished loading GWAS effect size, sample size and standard error.")
-
-    n_studies, p_snps = B.shape
-    log.info(f"Found N = {n_studies} studies, P = {p_snps} SNPs")
-
-    # number of factors
-    k = args.k
-    log.info(f"User set K = {k} latent factors.")
-
-    # set optionas for stopping rule
-    options = Options(args.elbo_tol, args.tau_tol, args.max_iter)
-
-    # set 5 hyperparameters: otherwise use default 1e-3
-    if args.hyper is not None:
-        HyperParams.halpha_a = float(args.hyper[0])
-        HyperParams.halpha_b = float(args.hyper[1])
-        HyperParams.htau_a = float(args.hyper[2])
-        HyperParams.htau_b = float(args.hyper[3])
-        HyperParams.hbeta = float(args.hyper[4])
-    log.info(
-        f"""set parameters
-          {HyperParams.halpha_a},{HyperParams.halpha_b},
-          {HyperParams.htau_a},{HyperParams.htau_b}, {HyperParams.hbeta}
-        """
-    )
-
+def fit(B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_sqrt):
     # set initializers
     log.info(f"Initalizing mean parameters with seed {args.seed}.")
     (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(
@@ -671,65 +525,16 @@ def main(args):
     # phalpha_a = HyperParams.halpha_a
     # phalpha_b = HyperParams.halpha_b
     log.info("Completed initalization.")
-
     f_finfo = jnp.finfo(float)  # Machine limits for floating point types
     oelbo, delbo = f_finfo.min, f_finfo.max
     # otau, dtau = 1000, 1000  # initial value for delta tau
-
     log.info("Starting Variational inference.")
     log.info("first iter may be slow due to JIT compilation).")
-
     RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
-        (
-            W_m,
-            W_var,
-            EWtW,
-            Z_m,
-            Z_var,
-            Mu_m,
-            Mu_var,
-            phtau_a,
-            phtau_b,
-            phalpha_a,
-            phalpha_b,
-            Ealpha,
-            Elog_alpha,
-            Etau,
-            Elog_tau,
-            mean_quad,
-        ) = runVB(
-            B,
-            W_m,
-            W_var,
-            EWtW,
-            Mu_m,
-            Ealpha,
-            Etau,
-            sampleN,
-            sampleN_sqrt,
-            n_studies,
-            p_snps,
-        )
-        check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
-            W_m,
-            W_var,
-            Z_m,
-            Z_var,
-            Mu_m,
-            Mu_var,
-            phtau_a,
-            phtau_b,
-            phalpha_a,
-            phalpha_b,
-            Ealpha,
-            Elog_alpha,
-            Etau,
-            Elog_tau,
-            B,
-            mean_quad,
-        )
+        Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo = _inner_fit(B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies,
+                                                               p_snps, sampleN, sampleN_sqrt)
 
         delbo = check_elbo - oelbo
         oelbo = check_elbo
@@ -743,54 +548,16 @@ def main(args):
 
         if jnp.fabs(delbo) < args.elbo_tol:
             break
-
     r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
-
     f_order = jnp.argsort(-jnp.abs(r2))
     ordered_r2 = r2[f_order]
     ordered_Z_m = Z_m[:, f_order]
     ordered_W_m = W_m[:, f_order]
 
-    f_info = np.column_stack((jnp.arange(k) + 1, Ealpha.real[f_order], ordered_r2))
-
+    f_info = jnp.column_stack((jnp.arange(k) + 1, Ealpha.real[f_order], ordered_r2))
     log.info(f"Finished inference after {idx} iterations.")
     log.info(f"Final elbo = {check_elbo} and resid precision = {Etau}")
     log.info(f"Final sorted Ealpha = {jnp.sort(Ealpha)}")
     log.info(f"Final sorted R2 = {ordered_r2}")
 
-    log.info("Writing results.")
-    np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
-
-    # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
-    EW2 = W_m ** 2 + jnp.diagonal(W_var)
-    # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
-    EZ2 = np.zeros((n_studies, k))
-    Z_m2 = Z_m ** 2
-    for i in range(n_studies):
-        EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
-
-    ordered_EW2 = EW2[:, f_order]
-    ordered_EZ2 = EZ2[:, f_order]
-    ordered_W_var = jnp.diagonal(W_var)[f_order]
-
-    np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
-    np.savetxt(
-        f"{args.output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
-    )
-
-    log.info("Finished. Goodbye.")
-
-    # check_elbo.block_until_ready()
-    # jax.profiler.save_device_memory_profile("testres/testmemory.prof")
-
-    return 0
-
-
-# user call this script will treat it like a program
-if __name__ == "__main__":
-    sys.exit(
-        main(sys.argv[1:])
-    )  # grab all arguments; first arg is alway the name of the script
+    return W_m, W_var, Z_m, Z_var, f_info, f_order, ordered_W_m, ordered_Z_m
