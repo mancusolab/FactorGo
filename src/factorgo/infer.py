@@ -460,6 +460,7 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
     return r2
 
 
+@jit
 def _inner_fit(
     B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies, p_snps, sampleN, sampleN_sqrt
 ):
