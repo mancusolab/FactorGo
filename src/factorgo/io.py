@@ -1,10 +1,12 @@
+from logging import Logger
+
 import numpy as np
 import pandas as pd
 
 from jax import numpy as jnp
 
 
-def read_data(z_path, N_path, log, scale=True):
+def read_data(z_path: str, N_path: str, log: Logger, scale: bool = True):
     """
     input z score summary stats:
     headers are ["snp", "trait1", "trait2", ..., "traitn"]
@@ -13,12 +15,11 @@ def read_data(z_path, N_path, log, scale=True):
     one column of sample size (with header) which has the same order as above
     """
 
-    # Read dataset (read as example frame)
+    # Read dataset (rows are SNPs)
     df_z = pd.read_csv(z_path, delimiter="\t", header=0)
     snp_col = df_z.columns[0]
 
     # drop the first column (axis = 1) and convert to nxp
-    # snp_col = df_z.columns[0]
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
     df_z = df_z.astype("float").T
 
@@ -33,6 +34,7 @@ def read_data(z_path, N_path, log, scale=True):
     # read sample size file and convert str into numerics, convert to nxp matrix
     df_N = pd.read_csv(N_path, delimiter="\t", header=0)
     df_N = df_N.astype("float")
+
     # convert sampleN (a file with one column and header)to arrays
     N_col = df_N.columns[0]
     sampleN = df_N[N_col].values
@@ -41,11 +43,21 @@ def read_data(z_path, N_path, log, scale=True):
     return df_z, sampleN, sampleN_sqrt
 
 
-def write_results(output, EW2, EZ2, W_var, f_order):
-    ordered_EW2 = EW2[:, f_order]
-    ordered_EZ2 = EZ2[:, f_order]
+def write_results(output, f_info, ordered_Z_m, ordered_W_m, W_var, Z_var, f_order):
+    n, k = ordered_Z_m.shape
+
     ordered_W_var = jnp.diagonal(W_var)[f_order]
-    np.savetxt(f"{output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
+
+    Z_var_diag = np.zeros((n, k))
+    for i in range(n):
+        Z_var_diag[i] = jnp.diagonal(Z_var[i])
+    ordered_Z_var_diag = Z_var_diag[:, f_order]
+
+    np.savetxt(f"{output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
+    np.savetxt(f"{output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
+    np.savetxt(
+        f"{output}.Z_var.tsv.gz", ordered_Z_var_diag.real, fmt="%s", delimiter="\t"
+    )
     np.savetxt(f"{output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t")
     return

@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import NamedTuple, Union
+from typing import NamedTuple, Tuple, Union
 
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.special as scp
 from jax import jit, random
+
+# from argparse import ArgumentParser
 
 
 @dataclass
@@ -95,12 +97,13 @@ class AuxState(NamedTuple):
     R_inv: jnp.ndarray
 
 
-def get_init(key_init, p, k, dat, log, init_opt="random"):
+def get_init(key_init, k, dat, log, init_opt: str = "random") -> Tuple:
     """
     initialize matrix for inference
     We update moments for Z and W first,
     so here only initiaze parameters required for updating those
     """
+    n, p = dat.shape
     w_shape = (p, k)
 
     W_var_init = jnp.identity(k)
@@ -108,7 +111,6 @@ def get_init(key_init, p, k, dat, log, init_opt="random"):
     if init_opt == "svd":
         U, D, Vh = jnpla.svd(dat, full_matrices=False)
         W_m_init = Vh[0:k, :].T
-        # Z_m_init = U[:, 0:k] * D[0:k]
         log.info("Initialize W using tsvd.")
     else:
         key_init, key_w = random.split(key_init)
@@ -285,8 +287,8 @@ def pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate):
     """
     pZ_m, pZ_var = zstate
     pW_m, pW_var = wstate
-    pMu_m, _ = mustate
-    phalpha_a, _, _, _ = alphastate
+    pMu_m, pMu_var = mustate
+    phalpha_a, phalpha_b, Ealpha, Elogalpha = alphastate
     b, R, R_inv = auxstate
     p, _ = pW_m.shape
 
@@ -307,16 +309,22 @@ def pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate):
     Ealpha_rot = phalpha_a / phalpha_b_rot
     Elog_alpha_rot = scp.digamma(phalpha_a.real) - jnp.log(phalpha_b_rot.real)
 
-    return JointState(
-        pZ_m_rot,
-        pZ_var_rot,
-        pW_m_rot,
-        pW_var_rot,
-        pMu_m_center,
-        phalpha_b_rot,
-        Ealpha_rot,
-        Elog_alpha_rot,
-    )
+    zstate_new = ZState(pZ_m_rot, pZ_var_rot)
+    wstate_new = WState(pW_m_rot, pW_var_rot)
+    mustate_new = MuState(pMu_m_center, pMu_var)
+    alphastate_new = AlphaState(phalpha_a, phalpha_b_rot, Ealpha_rot, Elog_alpha_rot)
+
+    return wstate_new, zstate_new, mustate_new, alphastate_new
+    # return JointState(
+    #     pZ_m_rot,
+    #     pZ_var_rot,
+    #     pW_m_rot,
+    #     pW_var_rot,
+    #     pMu_m_center,
+    #     phalpha_b_rot,
+    #     Ealpha_rot,
+    #     Elog_alpha_rot,
+    # )
 
 
 # @jit
@@ -332,28 +340,43 @@ def ptau_main(mean_quad, n, p):
 
 # write function to call all updating function
 @jit
-def runVB(B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt):
+def runVB(
+    B,
+    wstate_old,
+    EWtW_old,
+    mustate_old,
+    alphastate_old,
+    taustate_old,
+    sampleN,
+    sampleN_sqrt,
+):
     n, p = B.shape
 
-    zstate = pZ_main(B, wstate, EWtW, mustate, taustate, sampleN, sampleN_sqrt)
-    mustate = pMu_main(B, wstate, zstate, taustate, sampleN, sampleN_sqrt)
-    wstate = pW_main(B, zstate, mustate, taustate, alphastate, sampleN, sampleN_sqrt)
+    zstate = pZ_main(
+        B, wstate_old, EWtW_old, mustate_old, taustate_old, sampleN, sampleN_sqrt
+    )
+    mustate = pMu_main(B, wstate_old, zstate, taustate_old, sampleN, sampleN_sqrt)
+    wstate = pW_main(
+        B, zstate, mustate, taustate_old, alphastate_old, sampleN, sampleN_sqrt
+    )
     EWtW = p * wstate.W_var + wstate.W_m.T @ wstate.W_m
 
     alphastate = palpha_main(EWtW, p)
 
     # find aux params b and R:
-    auxstate = get_aux(zstate, wstate, EWtW, taustate, sampleN)
-    jointstate = pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate)
+    auxstate = get_aux(zstate, wstate, EWtW, taustate_old, sampleN)
+    wstate, zstate, mustate, alphastate = pjoint_main(
+        zstate, wstate, EWtW, mustate, alphastate, auxstate
+    )
 
-    EWtW = p * jointstate.W_var + jointstate.W_m.T @ jointstate.W_m
+    EWtW = p * wstate.W_var + wstate.W_m.T @ wstate.W_m
 
     mean_quad = calc_MeanQuadForm(
         wstate, EWtW, zstate, mustate, B, sampleN, sampleN_sqrt
     )
     taustate = ptau_main(mean_quad, n, p)
 
-    return wstate, zstate, mustate, alphastate, taustate, mean_quad
+    return wstate, EWtW, zstate, mustate, alphastate, taustate, mean_quad
 
 
 # ELBO functions
@@ -460,31 +483,41 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
 
 
 @jit
-def _inner_fit(B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt):
-    wstate, zstate, mustate, alphastate, taustate, mean_quad = runVB(
-        B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt
+def _inner_fit(
+    B,
+    wstate_old,
+    EWtW_old,
+    mustate_old,
+    alphastate_old,
+    taustate_old,
+    sampleN,
+    sampleN_sqrt,
+):
+    wstate, EWtW, zstate, mustate, alphastate, taustate, mean_quad = runVB(
+        B,
+        wstate_old,
+        EWtW_old,
+        mustate_old,
+        alphastate_old,
+        taustate_old,
+        sampleN,
+        sampleN_sqrt,
     )
 
     check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
         B, wstate, zstate, mustate, alphastate, taustate, mean_quad
     )
 
-    return (
-        alphastate.Ealpha,
-        taustate.Etau,
-        wstate.W_m,
-        wstate.W_var,
-        zstate.Z_m,
-        zstate.Z_var,
-        check_elbo,
-    )
+    return wstate, EWtW, zstate, mustate, alphastate, taustate, check_elbo
 
 
-def fit(B, args, k, key_init, log, options, p_snps, sampleN, sampleN_sqrt):
+def fit(B, args, k, key_init, log, options, sampleN, sampleN_sqrt):
     # set initializers
+    _, p_snps = B.shape
+
     log.info(f"Initalizing mean parameters with seed {args.seed}.")
     wstate, mustate, alphastate, taustate = get_init(
-        key_init, p_snps, k, B, log, args.init_factor
+        key_init, k, B, log, args.init_factor
     )
     EWtW = p_snps * wstate.W_var + wstate.W_m.T @ wstate.W_m
 
@@ -497,7 +530,7 @@ def fit(B, args, k, key_init, log, options, p_snps, sampleN, sampleN_sqrt):
     RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
-        Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo = _inner_fit(
+        wstate, EWtW, zstate, mustate, alphastate, taustate, check_elbo = _inner_fit(
             B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt
         )
 
@@ -505,22 +538,33 @@ def fit(B, args, k, key_init, log, options, p_snps, sampleN, sampleN_sqrt):
         oelbo = check_elbo
         if idx % RATE == 0:
             log.info(
-                f"itr={idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {Etau}"
+                f"itr={idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {taustate.Etau}"
             )
 
         if jnp.fabs(delbo) < args.elbo_tol:
             break
 
-    r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
+    r2 = R2(B, wstate.W_m, zstate.Z_m, taustate.Etau, sampleN_sqrt)
     f_order = jnp.argsort(-jnp.abs(r2))
     ordered_r2 = r2[f_order]
-    ordered_Z_m = Z_m[:, f_order]
-    ordered_W_m = W_m[:, f_order]
+    ordered_Z_m = zstate.Z_m[:, f_order]
+    ordered_W_m = wstate.W_m[:, f_order]
 
-    f_info = jnp.column_stack((jnp.arange(k) + 1, Ealpha.real[f_order], ordered_r2))
+    f_info = jnp.column_stack(
+        (jnp.arange(k) + 1, alphastate.Ealpha.real[f_order], ordered_r2)
+    )
     log.info(f"Finished inference after {idx} iterations.")
-    log.info(f"Final elbo = {check_elbo} and resid precision = {Etau}")
-    log.info(f"Final sorted Ealpha = {jnp.sort(Ealpha)}")
+    log.info(f"Final elbo = {check_elbo} and resid precision = {taustate.Etau}")
+    log.info(f"Final sorted Ealpha = {jnp.sort(alphastate.Ealpha)}")
     log.info(f"Final sorted R2 = {ordered_r2}")
 
-    return W_m, W_var, Z_m, Z_var, f_info, f_order, ordered_W_m, ordered_Z_m
+    return (
+        wstate.W_m,
+        wstate.W_var,
+        zstate.Z_m,
+        zstate.Z_var,
+        f_info,
+        f_order,
+        ordered_W_m,
+        ordered_Z_m,
+    )

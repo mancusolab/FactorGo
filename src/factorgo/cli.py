@@ -2,12 +2,9 @@ import argparse as ap
 import logging
 import sys
 
-import numpy as np
-
-import jax.numpy as jnp
 import jax.random as rdm
 
-from . import infer, io, util
+from src.factorgo import infer, io, util
 
 
 def get_logger(name, path=None):
@@ -46,12 +43,6 @@ def _main(args):
         help="Tolerance for change in ELBO to halt inference",
     )
     argp.add_argument(
-        "--tau-tol",
-        default=1e-3,
-        type=float,
-        help="Tolerance for change in tau to halt inference",
-    )
-    argp.add_argument(
         "--hyper",
         default=None,
         nargs="+",
@@ -82,7 +73,7 @@ def _main(args):
         type=int,
         help="Rate of printing elbo info; default is printing per 250 iters",
     )
-    argp.add_argument("-p", "--platform", choices=["cpu", "gpu"], default="cpu")
+    argp.add_argument("-p", "--platform", choices=["cpu", "gpu", "tpu"], default="cpu")
     argp.add_argument(
         "-s", "--seed", type=int, default=123456789, help="Seed for randomization."
     )
@@ -114,7 +105,7 @@ def _main(args):
     B, sampleN, sampleN_sqrt = io.read_data(
         args.Zscore_path, args.N_path, log, args.scale
     )
-    log.info("Finished loading GWAS effect size, sample size and standard error.")
+    log.info("Finished loading GWAS summary statistics and sample size.")
 
     n_studies, p_snps = B.shape
     log.info(f"Found N = {n_studies} studies, P = {p_snps} SNPs")
@@ -123,43 +114,31 @@ def _main(args):
     k = args.k
     log.info(f"User set K = {k} latent factors.")
 
-    # set optionas for stopping rule
-    options = infer.Options(args.elbo_tol, args.tau_tol, args.max_iter)
+    # set options for stopping rule
+    options = infer.Options(args.elbo_tol, args.max_iter)
 
-    # set 5 hyperparameters: otherwise use default 1e-3
+    # set 5 hyper-parameters: otherwise use default 1e-5
     if args.hyper is not None:
-        infer.HyperParams.halpha_a = float(args.hyper[0])
-        infer.HyperParams.halpha_b = float(args.hyper[1])
-        infer.HyperParams.htau_a = float(args.hyper[2])
-        infer.HyperParams.htau_b = float(args.hyper[3])
-        infer.HyperParams.hbeta = float(args.hyper[4])
+        util.set_hyper(args.hyper)
 
     log.info(
         f"""set parameters
-          {infer.HyperParams.halpha_a},{infer.HyperParams.halpha_b},
-          {infer.HyperParams.htau_a},{infer.HyperParams.htau_b}, {infer.HyperParams.hbeta}
+          halpha_a: {infer.HyperParams.halpha_a},
+          halpha_b: {infer.HyperParams.halpha_b},
+          htau_a: {infer.HyperParams.htau_a},
+          htau_b: {infer.HyperParams.htau_b},
+          hbeta: {infer.HyperParams.hbeta}
         """
     )
 
     W_m, W_var, Z_m, Z_var, f_info, f_order, ordered_W_m, ordered_Z_m = infer.fit(
-        B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_sqrt
+        B, args, k, key_init, log, options, sampleN, sampleN_sqrt
     )
 
     log.info("Writing results.")
-    np.savetxt(f"{args.output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
-
-    # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
-    EW2 = W_m ** 2 + jnp.diagonal(W_var)
-    # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
-    EZ2 = np.zeros((n_studies, k))
-    Z_m2 = Z_m ** 2
-    for i in range(n_studies):
-        EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
-
-    io.write_results(args.output, EW2, EZ2, W_var, f_order)
-
+    io.write_results(
+        args.output, f_info, ordered_Z_m, ordered_W_m, W_var, Z_var, f_order
+    )
     log.info("Finished. Goodbye.")
 
     return 0
