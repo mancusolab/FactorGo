@@ -1,0 +1,4 @@
+jax
+jaxlib
+numpy
+pandas

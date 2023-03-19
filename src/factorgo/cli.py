@@ -102,12 +102,13 @@ def _main(args):
 
     # setup to use either CPU (default) or GPU
     util.set_platform(args.platform)
-    util.update_x64(True)
-    # ensure 64bit precision (default use 32bit)
 
-    # init key (for jax)
+    # ensure 64bit precision (default use 32bit)
+    util.update_x64(True)
+
+    # init key (for jax), split into 2 chunk
     key = rdm.PRNGKey(args.seed)
-    key, key_init = rdm.split(key, 2)  # split into 2 chunk
+    key, key_init = rdm.split(key, 2)
 
     log.info("Loading GWAS effect size and standard error.")
     B, sampleN, sampleN_sqrt = io.read_data(

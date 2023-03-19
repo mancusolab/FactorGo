@@ -1,5 +1,6 @@
 import pytest
-from vibrate.skeleton import fib, main
+
+from factorgo.skeleton import fib, main
 
 __author__ = "Nicholas Mancuso"
 __copyright__ = "Nicholas Mancuso"

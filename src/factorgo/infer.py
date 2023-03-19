@@ -13,28 +13,27 @@ class Options:
 
     # tolerance
     elbo_tol: float = 1e-3
-    tau_tol: float = 1e-3
     max_iter: int = 1000
 
 
 class HyperParams:
     """simple class to store options for hyper-parameters"""
 
-    halpha_a: float = 1e-3
-    halpha_b: float = 1e-3
-    htau_a: float = 1e-3
-    htau_b: float = 1e-3
-    hbeta: float = 1e-3
+    halpha_a: float = 1e-5
+    halpha_b: float = 1e-5
+    htau_a: float = 1e-5
+    htau_b: float = 1e-5
+    hbeta: float = 1e-5
 
 
-class InitParams(NamedTuple):
-    """simple class to store options for initialization of matrix"""
-
-    W_m: jnp.ndarray
-    W_var: jnp.ndarray
-    Mu_m: jnp.ndarray
-    Ealpha: jnp.ndarray  # 1d
-    Etau: Union[float, jnp.ndarray]  # for scalars
+# class InitParams(NamedTuple):
+#     """simple class to store options for initialization of matrix"""
+#
+#     W_m: jnp.ndarray
+#     W_var: jnp.ndarray
+#     Mu_m: jnp.ndarray
+#     Ealpha: jnp.ndarray  # 1d
+#     Etau: Union[float, jnp.ndarray]  # for scalars
 
 
 class ZState(NamedTuple):
@@ -55,7 +54,8 @@ class MuState(NamedTuple):
     """simple class to store results of orthogonalization + projection"""
 
     Mu_m: jnp.ndarray
-    Mu_var: jnp.ndarray
+    Mu_var: Union[float, jnp.ndarray]
+    # Mu_var: jnp.ndarray
 
 
 class AlphaState(NamedTuple):
@@ -89,7 +89,13 @@ class JointState(NamedTuple):
     Elog_alpha: jnp.ndarray
 
 
-def get_init(key_init, n, p, k, dat, log, init_opt="random"):
+class AuxState(NamedTuple):
+    b: jnp.ndarray
+    R: jnp.ndarray
+    R_inv: jnp.ndarray
+
+
+def get_init(key_init, p, k, dat, log, init_opt="random"):
     """
     initialize matrix for inference
     We update moments for Z and W first,
@@ -114,13 +120,15 @@ def get_init(key_init, n, p, k, dat, log, init_opt="random"):
 
     Etau = HyperParams.htau_a / HyperParams.htau_b
 
-    return InitParams(
-        W_m=W_m_init,
-        W_var=W_var_init,
-        Mu_m=Mu_m,
-        Ealpha=Ealpha_init,
-        Etau=Etau,
+    # key quantities and placeholders
+    wstate = WState(W_m_init, W_var_init)
+    mustate = MuState(Mu_m, jnp.array([0.0]))
+    alphastate = AlphaState(
+        jnp.zeros((k,)), jnp.zeros((k,)), Ealpha_init, jnp.zeros((k,))
     )
+    taustate = TauState(jnp.array([0.0]), jnp.array([0.0]), Etau, jnp.array([0.0]))
+
+    return wstate, mustate, alphastate, taustate
 
 
 def batched_trace(A):
@@ -128,9 +136,13 @@ def batched_trace(A):
     return jnp.einsum("bii->b", A)
 
 
-def calc_MeanQuadForm(W_m, WtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt):
+def calc_MeanQuadForm(wstate, WtW, zstate, mustate, B, sampleN, sampleN_sqrt):
     # import pdb; pdb.set_trace()
+    W_m, _ = wstate
+    Z_m, Z_var = zstate
+    Mu_m, Mu_var = mustate
     p, _ = W_m.shape
+
     term1 = jnp.sum(B * B)
     term2 = jnp.sum(sampleN) * (p * Mu_var + Mu_m.T @ Mu_m)
     term3 = jnp.sum(
@@ -154,13 +166,18 @@ def logdet(M):
 
 
 # Update Posterior Moments
-def pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt):
+def pZ_main(B, wstate, EWtW, mustate, taustate, sampleN, sampleN_sqrt):
     """
     :pZ_m: (n,k) posterior moments
     :pZ_var: (n,k,k) posterior kxk covariance matrice for each study i
     """
+    W_m, _ = wstate
+    Mu_m, _ = mustate
+    _, _, Etau, _ = taustate
+
     n, p = B.shape
     _, k = W_m.shape
+
     pZ_var = jnpla.inv(
         ((Etau * EWtW)[:, :, jnp.newaxis] * sampleN).swapaxes(-1, 0) + jnp.eye(k)
     )
@@ -171,11 +188,15 @@ def pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt):
 
 
 # @jit
-def pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt):
+def pMu_main(B, wstate, zstate, taustate, sampleN, sampleN_sqrt):
     """
     :pMu_m: (p,)
     :pMu_var: a scalar (shared by all snps)
     """
+    W_m, _ = wstate
+    Z_m, _ = zstate
+    _, _, Etau, _ = taustate
+
     sum_N = jnp.sum(sampleN)
     pMu_var = 1 / (HyperParams.hbeta + Etau * sum_N)
     ZWt = Z_m @ W_m.T
@@ -186,11 +207,16 @@ def pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt):
 
 
 # @jit
-def pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt):
+def pW_main(B, zstate, mustate, taustate, alphastate, sampleN, sampleN_sqrt):
     """
     :pW_m: pxk
     :pW_V: kxk covariance matrice shared by all snps
     """
+    Z_m, Z_var = zstate
+    Mu_m, _ = mustate
+    _, _, Etau, _ = taustate
+    _, _, Ealpha, _ = alphastate
+
     n, _ = Z_m.shape
     Bres = B / sampleN_sqrt[:, None] - Mu_m
     tmp = Z_var.T @ sampleN + (Z_m.T * sampleN) @ Z_m
@@ -219,7 +245,11 @@ def palpha_main(WtW, p):
 
 
 # @jit
-def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
+def get_aux(zstate, wstate, EWtW, taustate, sampleN):
+
+    pZ_m, pZ_var = zstate
+    pW_m, pW_var = wstate
+    _, _, Etau, _ = taustate
     n, k = pZ_m.shape
     p, _ = pW_m.shape
 
@@ -245,15 +275,19 @@ def get_aux(pZ_m, pZ_var, pW_m, pW_var, EWtW, Etau, sampleN):
     R = U_weight @ V
     R_inv = V.T / jnp.sqrt(Lambda2) @ U.T
 
-    return b, R, R_inv
+    return AuxState(b, R, R_inv)
 
 
 # @jit
-def pjoint_main(
-    pZ_m, pZ_var, pW_m, pW_var, EWtW, pMu_m, phalpha_a, Etau, sampleN, b, R, R_inv
-):
-    # jointly transform latent space
-    n, k = pZ_m.shape
+def pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate):
+    """
+    jointly transform latent space
+    """
+    pZ_m, pZ_var = zstate
+    pW_m, pW_var = wstate
+    pMu_m, _ = mustate
+    phalpha_a, _, _, _ = alphastate
+    b, R, R_inv = auxstate
     p, _ = pW_m.shape
 
     # 1) remove bias
@@ -298,44 +332,28 @@ def ptau_main(mean_quad, n, p):
 
 # write function to call all updating function
 @jit
-def runVB(B, W_m, W_var, EWtW, Mu_m, Ealpha, Etau, sampleN, sampleN_sqrt, n, p):
-    Z_m, Z_var = pZ_main(B, W_m, EWtW, Mu_m, Etau, sampleN, sampleN_sqrt)
-    Mu_m, Mu_var = pMu_main(B, W_m, Z_m, Etau, sampleN, sampleN_sqrt)
-    W_m, W_var = pW_main(B, Z_m, Z_var, Mu_m, Etau, Ealpha, sampleN, sampleN_sqrt)
-    EWtW = p * W_var + W_m.T @ W_m
+def runVB(B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt):
+    n, p = B.shape
 
-    phalpha_a, phalpha_b, Ealpha, Elog_alpha = palpha_main(EWtW, p)
+    zstate = pZ_main(B, wstate, EWtW, mustate, taustate, sampleN, sampleN_sqrt)
+    mustate = pMu_main(B, wstate, zstate, taustate, sampleN, sampleN_sqrt)
+    wstate = pW_main(B, zstate, mustate, taustate, alphastate, sampleN, sampleN_sqrt)
+    EWtW = p * wstate.W_var + wstate.W_m.T @ wstate.W_m
+
+    alphastate = palpha_main(EWtW, p)
 
     # find aux params b and R:
-    b, R, R_inv = get_aux(Z_m, Z_var, W_m, W_var, EWtW, Etau, sampleN)
-    Z_m, Z_var, W_m, W_var, Mu_m, phalpha_b, Ealpha, Elog_alpha = pjoint_main(
-        Z_m, Z_var, W_m, W_var, EWtW, Mu_m, phalpha_a, Etau, sampleN, b, R, R_inv
-    )
-    EWtW = p * W_var + W_m.T @ W_m
+    auxstate = get_aux(zstate, wstate, EWtW, taustate, sampleN)
+    jointstate = pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate)
+
+    EWtW = p * jointstate.W_var + jointstate.W_m.T @ jointstate.W_m
 
     mean_quad = calc_MeanQuadForm(
-        W_m, EWtW, Z_m, Z_var, Mu_m, Mu_var, B, sampleN, sampleN_sqrt
+        wstate, EWtW, zstate, mustate, B, sampleN, sampleN_sqrt
     )
-    phtau_a, phtau_b, Etau, Elog_tau = ptau_main(mean_quad, n, p)
+    taustate = ptau_main(mean_quad, n, p)
 
-    return (
-        W_m,
-        W_var,
-        EWtW,
-        Z_m,
-        Z_var,
-        Mu_m,
-        Mu_var,
-        phtau_a,
-        phtau_b,
-        phalpha_a,
-        phalpha_b,
-        Ealpha,
-        Elog_alpha,
-        Etau,
-        Elog_tau,
-        mean_quad,
-    )
+    return wstate, zstate, mustate, alphastate, taustate, mean_quad
 
 
 # ELBO functions
@@ -393,24 +411,12 @@ def KL_Qtau(pa, pb):
 
 
 @jit
-def elbo(
-    W_m,
-    W_var,
-    Z_m,
-    Z_var,
-    Mu_m,
-    Mu_var,
-    phtau_a,
-    phtau_b,
-    phalpha_a,
-    phalpha_b,
-    Ealpha,
-    Elog_alpha,
-    Etau,
-    Elog_tau,
-    B,
-    mean_quad,
-):
+def elbo(B, wstate, zstate, mustate, alphastate, taustate, mean_quad):
+    W_m, W_var = wstate
+    Z_m, Z_var = zstate
+    Mu_m, Mu_var = mustate
+    phtau_a, phtau_b, Etau, Elog_tau = taustate
+    phalpha_a, phalpha_b, Ealpha, Elog_alpha = alphastate
     n, p = B.shape
 
     pD = 0.5 * (n * p * Elog_tau - Etau * mean_quad)
@@ -440,13 +446,6 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
     _, k = Z_m.shape
 
     tss = jnp.sum(B * B) * Etau
-    # pxk, nxk,
-    # resid = B.T - W_m @ (Z_m * sampleN_sqrt[:, jnp.newaxis]).T
-    # sse = batched_trace(jnp.swapaxes(resid * Etau, -2, -1) @ resid2)
-
-    # resid = B.T - batched_outer(W_m.T, (Z_m * sampleN_sqrt[:, None]).T)
-    # sse = Etau * jnp.sum((resid * resid))
-    # r2 = 1.0 - sse / tss
 
     # save memory space:
     sse = jnp.zeros((k,))
@@ -461,90 +460,45 @@ def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
 
 
 @jit
-def _inner_fit(
-    B, EWtW, Ealpha, Etau, Mu_m, W_m, W_var, n_studies, p_snps, sampleN, sampleN_sqrt
-):
-    (
-        W_m,
-        W_var,
-        EWtW,
-        Z_m,
-        Z_var,
-        Mu_m,
-        Mu_var,
-        phtau_a,
-        phtau_b,
-        phalpha_a,
-        phalpha_b,
-        Ealpha,
-        Elog_alpha,
-        Etau,
-        Elog_tau,
-        mean_quad,
-    ) = runVB(
-        B,
-        W_m,
-        W_var,
-        EWtW,
-        Mu_m,
-        Ealpha,
-        Etau,
-        sampleN,
-        sampleN_sqrt,
-        n_studies,
-        p_snps,
+def _inner_fit(B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt):
+    wstate, zstate, mustate, alphastate, taustate, mean_quad = runVB(
+        B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt
     )
+
     check_elbo, pD, kl_qw, kl_qz, kl_qmu, kl_qa, kl_qt = elbo(
-        W_m,
-        W_var,
-        Z_m,
-        Z_var,
-        Mu_m,
-        Mu_var,
-        phtau_a,
-        phtau_b,
-        phalpha_a,
-        phalpha_b,
-        Ealpha,
-        Elog_alpha,
-        Etau,
-        Elog_tau,
-        B,
-        mean_quad,
+        B, wstate, zstate, mustate, alphastate, taustate, mean_quad
     )
-    return Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo
+
+    return (
+        alphastate.Ealpha,
+        taustate.Etau,
+        wstate.W_m,
+        wstate.W_var,
+        zstate.Z_m,
+        zstate.Z_var,
+        check_elbo,
+    )
 
 
-def fit(B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_sqrt):
+def fit(B, args, k, key_init, log, options, p_snps, sampleN, sampleN_sqrt):
     # set initializers
     log.info(f"Initalizing mean parameters with seed {args.seed}.")
-    (W_m, W_var, Mu_m, Ealpha, Etau) = get_init(
-        key_init, n_studies, p_snps, k, B, log, args.init_factor
+    wstate, mustate, alphastate, taustate = get_init(
+        key_init, p_snps, k, B, log, args.init_factor
     )
-    EWtW = p_snps * W_var + W_m.T @ W_m
-    # phalpha_a = HyperParams.halpha_a
-    # phalpha_b = HyperParams.halpha_b
+    EWtW = p_snps * wstate.W_var + wstate.W_m.T @ wstate.W_m
+
     log.info("Completed initalization.")
     f_finfo = jnp.finfo(float)  # Machine limits for floating point types
     oelbo, delbo = f_finfo.min, f_finfo.max
-    # otau, dtau = 1000, 1000  # initial value for delta tau
+
     log.info("Starting Variational inference.")
     log.info("first iter may be slow due to JIT compilation).")
     RATE = args.rate  # print per 250 iterations
     for idx in range(options.max_iter):
 
         Ealpha, Etau, W_m, W_var, Z_m, Z_var, check_elbo = _inner_fit(
-            B,
-            EWtW,
-            Ealpha,
-            Etau,
-            Mu_m,
-            W_m,
-            W_var,
-            n_studies,
-            p_snps,
-            sampleN,
-            sampleN_sqrt,
+            B, wstate, EWtW, mustate, alphastate, taustate, sampleN, sampleN_sqrt
         )
 
         delbo = check_elbo - oelbo
@@ -554,11 +508,9 @@ def fit(B, args, k, key_init, log, n_studies, options, p_snps, sampleN, sampleN_
                 f"itr={idx} | Elbo = {check_elbo} | deltaElbo = {delbo} | Tau = {Etau}"
             )
 
-        # dtau = Etau - otau
-        # otau = Etau
-
         if jnp.fabs(delbo) < args.elbo_tol:
             break
+
     r2 = R2(B, W_m, Z_m, Etau, sampleN_sqrt)
     f_order = jnp.argsort(-jnp.abs(r2))
     ordered_r2 = r2[f_order]
