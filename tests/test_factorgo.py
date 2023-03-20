@@ -3,8 +3,8 @@ import logging
 # import numpy.testing as nptest
 import jax.random as rdm
 
-from src.factorgo import infer, io, util
-from src.factorgo.cli import get_logger
+from factorgo import infer, io, util
+from factorgo.cli import get_logger
 
 
 class args:

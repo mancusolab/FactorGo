@@ -4,7 +4,7 @@ import sys
 
 import jax.random as rdm
 
-from src.factorgo import infer, io, util
+from factorgo import infer, io, util
 
 
 def get_logger(name, path=None):

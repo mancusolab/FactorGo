@@ -3,7 +3,7 @@ from typing import Tuple
 
 import jax
 
-from . import infer
+from factorgo import infer
 
 
 def update_x64(state: bool) -> None:
