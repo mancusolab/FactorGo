@@ -74,11 +74,11 @@ class Options:
 class HyperParams:
     """simple class to store options for hyper-parameters"""
 
-    halpha_a: float = 1e-3
-    halpha_b: float = 1e-3
-    htau_a: float = 1e-3
-    htau_b: float = 1e-3
-    hbeta: float = 1e-3
+    halpha_a: float = 1e-5
+    halpha_b: float = 1e-5
+    htau_a: float = 1e-5
+    htau_b: float = 1e-5
+    hbeta: float = 1e-5
 
 
 class InitParams(NamedTuple):
@@ -143,7 +143,7 @@ class JointState(NamedTuple):
     Elog_alpha: jnp.ndarray
 
 
-def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
+def read_data(z_path, N_path, log, removeN=False, scaledat=True):
     """
     input z score summary stats: headers are ["snp", "trait1", "trait2", ..., "traitn"]
     input sample size file: one column of sample size (with header) which has the same order as above
@@ -158,11 +158,10 @@ def read_data(z_path, N_path, log, removeN=False, scaledat="False"):
     df_z.drop(labels=[snp_col], axis=1, inplace=True)
     df_z = df_z.astype("float").T
 
-    if scaledat == "True":
+    if scaledat:
         df_z = df_z.subtract(df_z.mean())
         df_z = df_z.divide(df_z.std())
-    else:
-        pass
+        log.info("Scale SNPs to mean zero and sd 1")
 
     # convert to numpy/jax device-array (n,p)
     df_z = jnp.array(df_z)
@@ -632,8 +631,8 @@ def main(args):
     )
     argp.add_argument(
         "--scaledat",
-        choices=["True", "False"],
-        default="True",
+        action="store_true",
+        default=True,
         help="scale each SNPs effect across traits (Default=True)",
     )
     # argp.add_argument(
@@ -818,8 +817,8 @@ def main(args):
     ordered_EZ2 = EZ2[:, f_order]
     ordered_W_var = jnp.diagonal(W_var)[f_order]
 
-    np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
-    np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
+    # np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
+    # np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
     np.savetxt(
         f"{args.output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
     )

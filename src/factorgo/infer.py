@@ -15,7 +15,7 @@ class Options:
 
     # tolerance
     elbo_tol: float = 1e-3
-    max_iter: int = 1000
+    max_iter: int = 10000
 
 
 class HyperParams:
