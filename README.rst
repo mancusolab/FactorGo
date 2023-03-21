@@ -1,3 +1,5 @@
+.. role:: raw-latex(raw)
+    :format: latex
 .. These are examples of badges you might want to add to your README:
    please update the URLs accordingly
 
@@ -34,12 +36,18 @@ FactorGo
 =======
 
 
-    Add a short description here!
+    FactorGo is a scalable variational factor analysis model that learns pleiotropic factors using GWAS summary statistics !
 
 
-A longer description of your project goes here...
+Here we present **Factor** analysis model in **G**\enetic ass\ **O**\ciation (FactorGo) to learn latent
+pleiotropic factors using GWAS summary statistics. Our model is implemented using `Just-in-time` (JIT)
+via `JAX <https://github.com/google/jax>`_ in python, which generates and compiles heavily optimized
+C++ code in real time and operates seamlessly on CPU, GPU or TPU. FactorGo is a command line tool and
+please see example below and full documentation.
 
-|Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_
+For preprint, please see: ...
+
+|Installation|_ | |Example|_ | |Notes|_ | |Support|_
 
 .. _Installation:
 .. |Installation| replace:: **Installation**
@@ -64,9 +72,10 @@ something goes here
 
 Example
 =================
-As an example, we use example data stored in `/example`,
-including one Z score summary statistics and sample size.
-To run factorgo as a command line tool:
+For iilustration, we use example data stored in `/example`,
+including Z score summary statistics file and sample size file.
+
+To run factorgo command line tool:
 
 * Zscore file: n20_p1k.Zscore.gz
 * Sample size file: n20_p1k.SampleN.tsv
@@ -95,9 +104,9 @@ The output contains five files:
 
 5. demo_test.factor.tsv.gz:  contains three columns,
 
-| a) factor index (ordered by R2),
+| a) factor index (ordered by :raw-latex:`$R^2$`),
 | b) posterior mean of ARD precision parameters,
-| c) variance explained by each factor ($R^2$)
+| c) variance explained by each factor (:raw-latex:`$R^2$`)
 
 
 .. _Notes:
@@ -105,21 +114,15 @@ The output contains five files:
 
 Notes
 =====
-
-
-.. _References:
-.. |References| replace:: **References**
-
-References
-==========
-
+something about change precision 64bits and platform
 
 .. _Support:
 .. |Support| replace:: **Support**
 
 Support
 =======
-
+Please report any bugs or feature requests in the `Issue Tracker <https://github.com/mancusolab/FactorGo/issues>`_.
+If you have any questions or comments please contact dongyuan@usc.edu and/or nmancuso@usc.edu.
 
 .. _pyscaffold-notes:
 
