@@ -61,7 +61,7 @@ linear combination of k shared latent variant loadings L Rpk  with trait-specifi
 
 where Ni is the sample size for the ith GWAS ,  is the intercept and i N(0, -1Ip) reflects residual
 heterogeneity in statistical power across studies with precision scalar .
-Given Z ={Zi }n i=1, and model parameters  L, F, , , we can compute the likelihood as
+Given Z ={Zi }n i=1, and model parameters  L, F, $\\mu$, $\\tau$, we can compute the likelihood as
 
 $$\\mathcal{L}(L, F, \\mu, \\tau |Z) = \\prod_i \\mathcal{N}_p ( \\sqrt{N_i} (L f_i + \\mu), \\tau^{-1} I_p)$$
 
@@ -139,9 +139,9 @@ The output contains five files:
 
 5. demo_test.factor.tsv.gz:  contains three columns,
 
-| a) factor index (ordered by :math:`$R^2$`),
+| a) factor index (ordered by $R^2$),
 | b) posterior mean of ARD precision parameters,
-| c) variance explained by each factor (:math:`$R^2$`)
+| c) variance explained by each factor ($R^2$)
 
 
 .. _Notes:
