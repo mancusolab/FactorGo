@@ -141,7 +141,7 @@ The output contains five files:
 
 | a) factor index (ordered by $R^2$),
 | b) posterior mean of ARD precision parameters,
-| c) variance explained by each factor ($R^2$)
+| c) variance explained by each factor ($\R^2$)
 
 
 .. _Notes:
