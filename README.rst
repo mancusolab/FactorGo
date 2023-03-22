@@ -58,7 +58,7 @@ linear combination of $k$ shared latent variant loadings $L \\in R^{p \\times k}
 
 $$Z_i = \\sqrt{N}_i \\beta_i + \\epsilon_i = \\sqrt{N}_i (L f_i + \\mu) + \\epsilon_i $$
 
-where $N_i$ is the sample size for the ith GWAS , $\\mu$  is the intercept and $\\epsilon_i \\sim N(0, \\tau^{-1}I_p)$ reflects residual
+where $N_i$ is the sample size for the $i^{th}$ GWAS , $\\mu$  is the intercept and $\\epsilon_i \\sim N(0, \\tau^{-1}I_p)$ reflects residual
 heterogeneity in statistical power across studies with precision scalar .
 Given $Z = \\{Z_i\\}^n_{i=1}$, and model parameters  $L$, $F$, $\\mu$, $\\tau$, we can compute the likelihood as
 
@@ -74,7 +74,7 @@ $$\Pr(L | \\alpha) = \\prod_{j=1}^{p} \\mathcal{N}_k (l^j | 0, diag(\\alpha^{-1}
 $$\Pr(\\mu) = \\mathcal{N}_p (\\mu | 0, \\phi^{-1} I_p)$$
 
 where $\\alpha \\in R^{k \\times 1}_{>0} (\\phi > 0)$ controls the prior precision for variant loadings (intercept). To avoid overfitting,
-and “shut off” uninformative factors when k is misspecified, we use automatic relevance determination (ARD) [1]_
+and “shut off” uninformative factors when $k$ is misspecified, we use automatic relevance determination (ARD) [1]_
 and place a prior over $\\alpha$ as
 
 $$\Pr(\\alpha | \\alpha_a, \\alpha_b) = \\prod_{q=1}^{k} G(\\alpha_q | \\alpha_a, \\alpha_b)$$
@@ -90,12 +90,12 @@ We impose broad priors by setting hyperparameters $\\phi = a_k = b_k= a_{\\tau} 
 
 Install factorgo
 =================
-We recommend create a conda environment and have `pip` installed.
+We recommend first create a conda environment and have `pip` installed.
 
 .. code-block:: bash
 
    # download use http address
-   git clone https://github.com/mancusolab/factorgo.git
+   git clone https://github.com/mancusolab/FactorGo.git
    # or use ssh agent
    git clone git@github.com:mancusolab/FactorGo.git
 
@@ -108,41 +108,41 @@ We recommend create a conda environment and have `pip` installed.
 
 Example
 =================
-For iilustration, we use example data stored in `/example`,
+For iilustration, we use example data stored in `/example/data`,
 including Z score summary statistics file and sample size file.
 
-To run factorgo command line tool:
+To run factorgo command line tool, we specify the following input files and flags:
 
-* Zscore file: n20_p1k.Zscore.gz
+* GWAS Zscore file: n20_p1k.Zscore.tsv.gz
 * Sample size file: n20_p1k.SampleN.tsv
-* --k 5: estimate 5 latent factors
+* -k 5: estimate 5 latent factors
 * --scale: the snp columns of Zscore matrix is center and standardized
 * -o: output directory and prefix
 
 .. code-block:: bash
 
    factorgo \
-        ./example/n20_p1k.Zscore.gz \
-        ./example/n20_p1k.SampleN.tsv \
+        ./example/data/n20_p1k.Zscore.tsv.gz \
+        ./example/data/n20_p1k.SampleN.tsv \
         -k 5 \
         --scale \
-        -o ./example/demo_test
+        -o ./example/result/demo_test
 
-The output contains five files:
+The output contains five result files:
 
 1. demo_test.Wm.tsv.gz: posterior mean of loading matrix W (pxk)
 
 2. demo_test.Zm.tsv.gz:  posterior mean of factor score Z (nxk)
 
-3. demo_test.W_var.tsv.gz:  posterior variance of loading matrix W (kx1)
+3. demo_test.Wvar.tsv.gz:  posterior variance of loading matrix W (kx1)
 
-4. demo_test.Z_var.tsv.gz:  posterior variance of factor score Z (nxk)
+4. demo_test.Zvar.tsv.gz:  posterior variance of factor score Z (nxk)
 
-5. demo_test.factor.tsv.gz:  contains three columns,
+5. demo_test.factor.tsv.gz:  contains the following three columns
 
-| a) factor index (ordered by R2),
-| b) posterior mean of ARD precision parameters,
-| c) variance explained by each factor (R2)
+   | a) factor index (ordered by R2),
+   | b) posterior mean of ARD precision parameters,
+   | c) variance explained by each factor (R2)
 
 
 .. _Notes:
@@ -150,7 +150,18 @@ The output contains five files:
 
 Notes
 =====
-something about change precision 64bits and platform
+The default computation device for FactorGo is CPU. To switch to GPU device, you can specify the platform (cpu/gpu/tpu) using the flag "-p", 
+for example:
+
+.. code-block:: bash
+
+   factorgo \
+        ./example/data/n20_p1k.Zscore.tsv.gz \
+        ./example/data/n20_p1k.SampleN.tsv \
+        -k 5 \
+        --scale \
+        -p gpu \ # use gpu device
+        -o ./example/result/demo_test
 
 
 .. _References:
