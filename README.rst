@@ -63,8 +63,7 @@ where Ni is the sample size for the ith GWAS ,  is the intercept and i N(0, -1Ip
 heterogeneity in statistical power across studies with precision scalar .
 Given Z ={Zi }n i=1, and model parameters  L, F, , , we can compute the likelihood as
 
-.. math::
-    $$\mathcal{L}(L, F, \mu, \tau |Z) = \prod_i \mathcal{N}_p ( \sqrt{N_i} (L f_i + \mu), \tau^{-1} I_p)$$\\
+$$\mathcal{L}(L, F, \mu, \tau |Z) = \prod_i \mathcal{N}_p ( \sqrt{N_i} (L f_i + \mu), \tau^{-1} I_p)$$
 
 To model our uncertainty in L, F,  , we take a full Bayesian approach in the lower dimension latent space
 similar to a Bayesian PCA model16 as,
