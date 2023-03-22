@@ -57,7 +57,7 @@ def write_results(output, f_info, ordered_Z_m, ordered_W_m, W_var, Z_var, f_orde
     np.savetxt(f"{output}.Zm.tsv.gz", ordered_Z_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(
-        f"{output}.Z_var.tsv.gz", ordered_Z_var_diag.real, fmt="%s", delimiter="\t"
+        f"{output}.Zvar.tsv.gz", ordered_Z_var_diag.real, fmt="%s", delimiter="\t"
     )
-    np.savetxt(f"{output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t")
+    np.savetxt(f"{output}.Wvar.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t")
     return

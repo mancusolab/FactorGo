@@ -1,8 +1,7 @@
-
 python runFactorGo.old.py \
-    ./n20_p1k.Zscore.gz  \
-    ./n20_p1k.SampleN.tsv  \
+    ./data/n20_p1k.Zscore.tsv.gz  \
+    ./data/n20_p1k.SampleN.tsv  \
     -k 5 \
     --scaledat \
-    -o ./demo_old\
+    -o ./result/demo_old\
     -p cpu

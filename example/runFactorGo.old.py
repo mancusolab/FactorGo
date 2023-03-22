@@ -805,22 +805,31 @@ def main(args):
     np.savetxt(f"{args.output}.Wm.tsv.gz", ordered_W_m.real, fmt="%s", delimiter="\t")
     np.savetxt(f"{args.output}.factor.tsv.gz", f_info, fmt="%s", delimiter="\t")
 
-    # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
-    EW2 = W_m ** 2 + jnp.diagonal(W_var)
-    # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
-    EZ2 = np.zeros((n_studies, k))
-    Z_m2 = Z_m ** 2
-    for i in range(n_studies):
-        EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
+    # # calculate E(W^2) [unordered]: W_m pxk, W_var kxk
+    # EW2 = W_m ** 2 + jnp.diagonal(W_var)
+    # # calculate E(Z^2) [unordered]: Z_m nxk, Z_var nxkxk
+    # EZ2 = np.zeros((n_studies, k))
+    # Z_m2 = Z_m ** 2
+    # for i in range(n_studies):
+    #     EZ2[i] = Z_m2[i] + jnp.diagonal(Z_var[i])
+    #
+    # ordered_EW2 = EW2[:, f_order]
+    # ordered_EZ2 = EZ2[:, f_order]
 
-    ordered_EW2 = EW2[:, f_order]
-    ordered_EZ2 = EZ2[:, f_order]
     ordered_W_var = jnp.diagonal(W_var)[f_order]
+
+    Z_var_diag = np.zeros((n_studies, k))
+    for i in range(n_studies):
+        Z_var_diag[i] = jnp.diagonal(Z_var[i])
+    ordered_Z_var_diag = Z_var_diag[:, f_order]
 
     # np.savetxt(f"{args.output}.EW2.tsv.gz", ordered_EW2.real, fmt="%s", delimiter="\t")
     # np.savetxt(f"{args.output}.EZ2.tsv.gz", ordered_EZ2.real, fmt="%s", delimiter="\t")
     np.savetxt(
-        f"{args.output}.W_var.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
+        f"{args.output}.Wvar.tsv.gz", ordered_W_var.real, fmt="%s", delimiter="\t"
+    )
+    np.savetxt(
+        f"{args.output}.Zvar.tsv.gz", ordered_Z_var_diag.real, fmt="%s", delimiter="\t"
     )
 
     log.info("Finished. Goodbye.")

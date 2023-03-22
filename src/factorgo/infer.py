@@ -6,14 +6,11 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.special as scp
 from jax import jit, random
 
-# from argparse import ArgumentParser
-
 
 @dataclass
 class Options:
-    """simple class to store options for stopping rule"""
+    """simple class to store options for stopping rule (tolerance)"""
 
-    # tolerance
     elbo_tol: float = 1e-3
     max_iter: int = 10000
 
@@ -28,58 +25,47 @@ class HyperParams:
     hbeta: float = 1e-5
 
 
-# class InitParams(NamedTuple):
-#     """simple class to store options for initialization of matrix"""
-#
-#     W_m: jnp.ndarray
-#     W_var: jnp.ndarray
-#     Mu_m: jnp.ndarray
-#     Ealpha: jnp.ndarray  # 1d
-#     Etau: Union[float, jnp.ndarray]  # for scalars
-
-
 class ZState(NamedTuple):
-    """simple class to store results of orthogonalization + projection"""
+    """simple class to store results of posterior mean and variance for Z"""
 
     Z_m: jnp.ndarray
     Z_var: jnp.ndarray
 
 
 class WState(NamedTuple):
-    """simple class to store results of orthogonalization + projection"""
+    """simple class to store results of posterior mean and variance for W"""
 
     W_m: jnp.ndarray
-    W_var: Union[float, jnp.ndarray]
+    W_var: jnp.ndarray
 
 
 class MuState(NamedTuple):
-    """simple class to store results of orthogonalization + projection"""
+    """simple class to store results of posterior mean and variance (scalar) for Mu"""
 
     Mu_m: jnp.ndarray
     Mu_var: Union[float, jnp.ndarray]
-    # Mu_var: jnp.ndarray
 
 
 class AlphaState(NamedTuple):
-    """simple class to store options for hyper-parameters and Ealpha"""
+    """simple class to store options for hyper-parameters and moments for Alpha"""
 
-    phalpha_a: jnp.ndarray
+    phalpha_a: Union[float, jnp.ndarray]
     phalpha_b: jnp.ndarray
     Ealpha: jnp.ndarray
     Elog_alpha: jnp.ndarray
 
 
 class TauState(NamedTuple):
-    """simple class to store options for hyper-parameters and Etau"""
+    """simple class to store options for hyper-parameters and moments for Tau"""
 
-    phtau_a: jnp.ndarray
-    phtau_b: jnp.ndarray
+    phtau_a: Union[float, jnp.ndarray]
+    phtau_b: Union[float, jnp.ndarray]
     Etau: Union[float, jnp.ndarray]
     Elog_tau: Union[float, jnp.ndarray]
 
 
 class JointState(NamedTuple):
-    """simple class to store options for Joint update of variables"""
+    """simple class to store options for joint update of variables"""
 
     Z_m: jnp.ndarray
     Z_var: jnp.ndarray
@@ -92,17 +78,20 @@ class JointState(NamedTuple):
 
 
 class AuxState(NamedTuple):
+    """simple class to store options for auxilary parameters"""
+
     b: jnp.ndarray
     R: jnp.ndarray
     R_inv: jnp.ndarray
 
 
 def get_init(key_init, k, dat, log, init_opt: str = "random") -> Tuple:
+    """initialize matrix for inference
+    only need to initialize parameters required for updating Z, mu and W.
+    quantities not used for updating those parameters are initialized with zeros
+    as placeholder, with shape for jit to allocate memory
     """
-    initialize matrix for inference
-    We update moments for Z and W first,
-    so here only initiaze parameters required for updating those
-    """
+
     n, p = dat.shape
     w_shape = (p, k)
 
@@ -111,10 +100,13 @@ def get_init(key_init, k, dat, log, init_opt: str = "random") -> Tuple:
     if init_opt == "svd":
         U, D, Vh = jnpla.svd(dat, full_matrices=False)
         W_m_init = Vh[0:k, :].T
-        log.info("Initialize W using tsvd.")
-    else:
+        log.info("Initialize W using tSVD.")
+    elif init_opt == "random":
         key_init, key_w = random.split(key_init)
         W_m_init = random.normal(key_w, shape=w_shape)
+    else:
+        log.info(f"{init_opt} is not supported")
+        exit()
 
     Mu_m = jnp.zeros((p,))
 
@@ -126,7 +118,7 @@ def get_init(key_init, k, dat, log, init_opt: str = "random") -> Tuple:
     wstate = WState(W_m_init, W_var_init)
     mustate = MuState(Mu_m, jnp.array([0.0]))
     alphastate = AlphaState(
-        jnp.zeros((k,)), jnp.zeros((k,)), Ealpha_init, jnp.zeros((k,))
+        jnp.array([0.0]), jnp.zeros((k,)), Ealpha_init, jnp.zeros((k,))
     )
     taustate = TauState(jnp.array([0.0]), jnp.array([0.0]), Etau, jnp.array([0.0]))
 
@@ -134,11 +126,13 @@ def get_init(key_init, k, dat, log, init_opt: str = "random") -> Tuple:
 
 
 def batched_trace(A):
+    """calculate trace for each batched matrice"""
     # bii->b represents doing batched trace operations
     return jnp.einsum("bii->b", A)
 
 
 def calc_MeanQuadForm(wstate, WtW, zstate, mustate, B, sampleN, sampleN_sqrt):
+    """calculate quadratic term E[(Zscore - fitted)^2]"""
     # import pdb; pdb.set_trace()
     W_m, _ = wstate
     Z_m, Z_var = zstate
@@ -161,15 +155,13 @@ def calc_MeanQuadForm(wstate, WtW, zstate, mustate, B, sampleN, sampleN_sqrt):
 
 
 def logdet(M):
-    """
-    calculate logdet for each batched matrice
-    """
+    """calculate log determinant for each batched matrice"""
     return jnpla.slogdet(M)[1]
 
 
 # Update Posterior Moments
 def pZ_main(B, wstate, EWtW, mustate, taustate, sampleN, sampleN_sqrt):
-    """
+    """update posterior moments for factor score Z
     :pZ_m: (n,k) posterior moments
     :pZ_var: (n,k,k) posterior kxk covariance matrice for each study i
     """
@@ -189,9 +181,8 @@ def pZ_main(B, wstate, EWtW, mustate, taustate, sampleN, sampleN_sqrt):
     return ZState(pZ_m, pZ_var)
 
 
-# @jit
 def pMu_main(B, wstate, zstate, taustate, sampleN, sampleN_sqrt):
-    """
+    """update posterior moments for intercept Mu
     :pMu_m: (p,)
     :pMu_var: a scalar (shared by all snps)
     """
@@ -208,9 +199,8 @@ def pMu_main(B, wstate, zstate, taustate, sampleN, sampleN_sqrt):
     return MuState(pMu_m, pMu_var)
 
 
-# @jit
 def pW_main(B, zstate, mustate, taustate, alphastate, sampleN, sampleN_sqrt):
-    """
+    """update posterior moments for factor loading W
     :pW_m: pxk
     :pW_V: kxk covariance matrice shared by all snps
     """
@@ -230,10 +220,9 @@ def pW_main(B, zstate, mustate, taustate, alphastate, sampleN, sampleN_sqrt):
     return WState(pW_m, pW_V)
 
 
-# @jit
 def palpha_main(WtW, p):
-    """
-    :phalpha_a: shared by all k latent factirs
+    """update posterior moments for ARD parameter alpha
+    :phalpha_a: a scalar shared by all k latent factors
     :phalpha_b: (k,)
     """
 
@@ -246,9 +235,8 @@ def palpha_main(WtW, p):
     return AlphaState(phalpha_a, phalpha_b, Ealpha, Elog_alpha)
 
 
-# @jit
 def get_aux(zstate, wstate, EWtW, taustate, sampleN):
-
+    """find auxillary parameters for transformation method"""
     pZ_m, pZ_var = zstate
     pW_m, pW_var = wstate
     _, _, Etau, _ = taustate
@@ -280,11 +268,8 @@ def get_aux(zstate, wstate, EWtW, taustate, sampleN):
     return AuxState(b, R, R_inv)
 
 
-# @jit
 def pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate):
-    """
-    jointly transform latent space
-    """
+    """jointly transform latent space"""
     pZ_m, pZ_var = zstate
     pW_m, pW_var = wstate
     pMu_m, pMu_var = mustate
@@ -315,20 +300,10 @@ def pjoint_main(zstate, wstate, EWtW, mustate, alphastate, auxstate):
     alphastate_new = AlphaState(phalpha_a, phalpha_b_rot, Ealpha_rot, Elog_alpha_rot)
 
     return wstate_new, zstate_new, mustate_new, alphastate_new
-    # return JointState(
-    #     pZ_m_rot,
-    #     pZ_var_rot,
-    #     pW_m_rot,
-    #     pW_var_rot,
-    #     pMu_m_center,
-    #     phalpha_b_rot,
-    #     Ealpha_rot,
-    #     Elog_alpha_rot,
-    # )
 
 
-# @jit
 def ptau_main(mean_quad, n, p):
+    """update posterior moments for global scaling parameter Tau"""
     phtau_a = HyperParams.htau_a + n * p * 0.5
     phtau_b = 0.5 * mean_quad + HyperParams.htau_b
 
@@ -350,6 +325,7 @@ def runVB(
     sampleN,
     sampleN_sqrt,
 ):
+    """One updating step in the recursive loop"""
     n, p = B.shape
 
     zstate = pZ_main(
@@ -381,6 +357,7 @@ def runVB(
 
 # ELBO functions
 def KL_QW(W_m, W_var, Ealpha, Elog_alpha):
+    """KL divergence between estimated posterior W and prior"""
     p, k = W_m.shape
     kl_qw = -0.5 * jnp.sum(
         logdet(W_var)
@@ -393,6 +370,7 @@ def KL_QW(W_m, W_var, Ealpha, Elog_alpha):
 
 
 def KL_QZ(Z_m, Z_var):
+    """KL divergence between estimated posterior Z and prior"""
     n, k = Z_m.shape
     kl_qz = 0.5 * jnp.sum(
         batched_trace(Z_var) + jnp.sum(Z_m * Z_m, axis=1) - k - logdet(Z_var)
@@ -401,6 +379,7 @@ def KL_QZ(Z_m, Z_var):
 
 
 def KL_QMu(Mu_m, Mu_var):
+    """KL divergence between estimated posterior Mu and prior"""
     p = Mu_m.size
     kl_qmu = 0.5 * (
         jnp.sum(HyperParams.hbeta * Mu_var)
@@ -413,6 +392,7 @@ def KL_QMu(Mu_m, Mu_var):
 
 
 def KL_gamma(pa, pb, ha, hb):
+    """KL divergence between two gamma distributions"""
     kl_gamma = (
         (pa - ha) * scp.digamma(pa)
         - scp.gammaln(pa)
@@ -424,17 +404,20 @@ def KL_gamma(pa, pb, ha, hb):
 
 
 def KL_Qalpha(pa, pb):
+    """KL divergence between estimated posterior Alpha and prior"""
     kl_qa = jnp.sum(KL_gamma(pa, pb, HyperParams.halpha_a, HyperParams.halpha_b))
     return kl_qa
 
 
 def KL_Qtau(pa, pb):
+    """KL divergence between estimated posterior Tau and prior"""
     kl_qtau = KL_gamma(pa, pb, HyperParams.htau_a, HyperParams.htau_b)
     return kl_qtau
 
 
 @jit
 def elbo(B, wstate, zstate, mustate, alphastate, taustate, mean_quad):
+    """Calculate ELBO"""
     W_m, W_var = wstate
     Z_m, Z_var = zstate
     Mu_m, Mu_var = mustate
@@ -464,13 +447,15 @@ def elbo(B, wstate, zstate, mustate, alphastate, taustate, mean_quad):
 
 # calculate R2 for ordered factors: exausted memory
 def R2(B, W_m, Z_m, Etau, sampleN_sqrt):
-    # import pdb; pdb.set_trace()
+    """Calculate variance explained by each inferred factor
+    Use residuals to calculate this.
+    """
+
     n, p = B.shape
     _, k = Z_m.shape
 
     tss = jnp.sum(B * B) * Etau
 
-    # save memory space:
     sse = jnp.zeros((k,))
     for i in range(n):
         WZ = W_m * Z_m[i] * sampleN_sqrt[i]  # pxk
@@ -493,6 +478,7 @@ def _inner_fit(
     sampleN,
     sampleN_sqrt,
 ):
+    """update parameters and calculate ELBO"""
     wstate, EWtW, zstate, mustate, alphastate, taustate, mean_quad = runVB(
         B,
         wstate_old,
@@ -512,22 +498,23 @@ def _inner_fit(
 
 
 def fit(B, args, k, key_init, log, options, sampleN, sampleN_sqrt):
+    """Wrapper function for running factorgo"""
     # set initializers
     _, p_snps = B.shape
 
-    log.info(f"Initalizing mean parameters with seed {args.seed}.")
+    log.info(f"Initializing mean parameters with seed {args.seed}.")
     wstate, mustate, alphastate, taustate = get_init(
         key_init, k, B, log, args.init_factor
     )
     EWtW = p_snps * wstate.W_var + wstate.W_m.T @ wstate.W_m
 
-    log.info("Completed initalization.")
+    log.info("Completed initialization.")
     f_finfo = jnp.finfo(float)  # Machine limits for floating point types
     oelbo, delbo = f_finfo.min, f_finfo.max
 
     log.info("Starting Variational inference.")
     log.info("first iter may be slow due to JIT compilation).")
-    RATE = args.rate  # print per 250 iterations
+    RATE = args.rate  # print per RATE iterations
     for idx in range(options.max_iter):
 
         wstate, EWtW, zstate, mustate, alphastate, taustate, check_elbo = _inner_fit(
@@ -545,7 +532,7 @@ def fit(B, args, k, key_init, log, options, sampleN, sampleN_sqrt):
             break
 
     r2 = R2(B, wstate.W_m, zstate.Z_m, taustate.Etau, sampleN_sqrt)
-    f_order = jnp.argsort(-jnp.abs(r2))
+    f_order = jnp.argsort(-jnp.abs(r2))  # get index for sorting
     ordered_r2 = r2[f_order]
     ordered_Z_m = zstate.Z_m[:, f_order]
     ordered_W_m = wstate.W_m[:, f_order]
@@ -554,7 +541,7 @@ def fit(B, args, k, key_init, log, options, sampleN, sampleN_sqrt):
         (jnp.arange(k) + 1, alphastate.Ealpha.real[f_order], ordered_r2)
     )
     log.info(f"Finished inference after {idx} iterations.")
-    log.info(f"Final elbo = {check_elbo} and resid precision = {taustate.Etau}")
+    log.info(f"Final elbo = {check_elbo} and resid precision Tau = {taustate.Etau}")
     log.info(f"Final sorted Ealpha = {jnp.sort(alphastate.Ealpha)}")
     log.info(f"Final sorted R2 = {ordered_r2}")
 
