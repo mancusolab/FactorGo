@@ -37,7 +37,7 @@ FactorGo
     FactorGo is a scalable variational factor analysis model that learns pleiotropic factors using GWAS summary statistics !
 
 
-Here we present **Factor** analysis model in **G**\enetic ass\ **O**\ciation (FactorGo) to learn latent
+We present **Factor** analysis model in **G**\enetic ass\ **O**\ciation (FactorGo) to learn latent
 pleiotropic factors using GWAS summary statistics. Our model is implemented using `Just-in-time` (JIT)
 via `JAX <https://github.com/google/jax>`_ in python, which generates and compiles heavily optimized
 C++ code in real time and operates seamlessly on CPU, GPU or TPU. FactorGo is a command line tool and
@@ -78,7 +78,7 @@ and “shut off” uninformative factors when k is misspecified, we use automati
 and place a prior over $\\alpha$ as
 
 $$\Pr(\\alpha | \\alpha_a, \\alpha_b) = \\prod_{q=1}^{k} G(\\alpha_q | \\alpha_a, \\alpha_b)$$
-    
+
 $$\Pr(\\tau | \\tau_a, \\tau_b) = G(\\tau | \\tau_a, \\tau_b)$$
 
 Lastly, we place a prior over the shared residual variance across GWAS studies as $\\tau \\sim G(a , b)$.
@@ -90,14 +90,14 @@ We impose broad priors by setting hyperparameters $\\phi = a_k = b_k= a_{\\tau} 
 
 Install factorgo
 =================
-something goes here
+We recommend create a conda environment and have `pip` installed.
 
-.. code-block::
+.. code-block:: bash
 
    # download use http address
    git clone https://github.com/mancusolab/factorgo.git
    # or use ssh agent
-   git clone https://github.com/mancusolab/FactorGo.git
+   git clone git@github.com:mancusolab/FactorGo.git
 
    cd factorgo
    pip install -e .
@@ -119,7 +119,7 @@ To run factorgo command line tool:
 * --scale: the snp columns of Zscore matrix is center and standardized
 * -o: output directory and prefix
 
-.. code-block::
+.. code-block:: bash
 
    factorgo \
         ./example/n20_p1k.Zscore.gz \
