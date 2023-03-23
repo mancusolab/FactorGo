@@ -32,10 +32,7 @@
 =======
 FactorGo
 =======
-
-
-    FactorGo is a scalable variational factor analysis model that learns pleiotropic factors using GWAS summary statistics !
-
+FactorGo is a scalable variational factor analysis model that learns pleiotropic factors using GWAS summary statistics!
 
 We present **Factor** analysis model in **G**\enetic ass\ **O**\ciation (FactorGo) to learn latent
 pleiotropic factors using GWAS summary statistics. Our model is implemented using `Just-in-time` (JIT)
@@ -43,13 +40,16 @@ via `JAX <https://github.com/google/jax>`_ in python, which generates and compil
 C++ code in real time and operates seamlessly on CPU, GPU or TPU. FactorGo is a command line tool and
 please see example below and full documentation.
 
-For preprint, please see: ...
+For preprint, please see: 
+
+    | TBD
 
 |Model|_ | |Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_
 
+=================
+
 .. _Model:
 .. |Model| replace:: **Model**
-
 FactorGo model
 =================
 FactorGo assumes the true genetic effect can be decomposed into latent pleiotropic factors.
@@ -88,7 +88,7 @@ We impose broad priors by setting hyperparameters $\\phi = a_k = b_k= a_{\\tau} 
 .. _Installation:
 .. |Installation| replace:: **Installation**
 
-Install factorgo
+Install ``factorgo``
 =================
 We recommend first create a conda environment and have `pip` installed.
 
@@ -100,7 +100,7 @@ We recommend first create a conda environment and have `pip` installed.
    git clone git@github.com:mancusolab/FactorGo.git
 
    cd factorgo
-   pip install -e .
+   pip install .
 
 
 .. _Example:
@@ -111,7 +111,7 @@ Example
 For iilustration, we use example data stored in `/example/data`,
 including Z score summary statistics file and sample size file.
 
-To run factorgo command line tool, we specify the following input files and flags:
+To run ``factorgo`` command line tool, we specify the following input files and flags:
 
 * GWAS Zscore file: n20_p1k.Zscore.tsv.gz
 * Sample size file: n20_p1k.SampleN.tsv
@@ -131,15 +131,10 @@ To run factorgo command line tool, we specify the following input files and flag
 The output contains five result files:
 
 1. demo_test.Wm.tsv.gz: posterior mean of loading matrix W (pxk)
-
 2. demo_test.Zm.tsv.gz:  posterior mean of factor score Z (nxk)
-
 3. demo_test.Wvar.tsv.gz:  posterior variance of loading matrix W (kx1)
-
 4. demo_test.Zvar.tsv.gz:  posterior variance of factor score Z (nxk)
-
 5. demo_test.factor.tsv.gz:  contains the following three columns
-
    | a) factor index (ordered by R2),
    | b) posterior mean of ARD precision parameters,
    | c) variance explained by each factor (R2)
@@ -150,7 +145,7 @@ The output contains five result files:
 
 Notes
 =====
-The default computation device for FactorGo is CPU. To switch to GPU device, you can specify the platform (cpu/gpu/tpu) using the flag "-p", 
+The default computation device for ``factorgo`` is CPU. To switch to GPU device, you can specify the platform (cpu/gpu/tpu) using the flag `-p gpu` 
 for example:
 
 .. code-block:: bash
@@ -162,7 +157,8 @@ for example:
         --scale \
         -p gpu \ # use gpu device
         -o ./example/result/demo_test
-
+        
+``factorgo`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install SuShiE using ``pip`` in the desired environment.
 
 .. _References:
 .. |References| replace:: **References**
