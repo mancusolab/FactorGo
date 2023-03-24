@@ -23,11 +23,21 @@
         :alt: Twitter
         :target: https://twitter.com/factorgo
 
-.. image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
+|Maintenance yes| |Star| |MIT license| |PyScaffold|
+
+.. |PyScaffold| image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
     :alt: Project generated with PyScaffold
     :target: https://pyscaffold.org/
 
-|
+.. |Maintenance yes| image:: https://img.shields.io/badge/Maintained%3F-yes-green.svg
+   :target: https://GitHub.com/Naereen/StrapDown.js/graphs/commit-activity
+
+.. |Star| image:: https://img.shields.io/github/stars/mancusolab/factorgo?style=social
+        :alt: Github
+        :target: https://github.com/mancusolab/factorgo
+
+.. |MIT license| image:: https://img.shields.io/badge/License-MIT-blue.svg
+   :target: https://lbesson.mit-license.org/
 
 =======
 FactorGo
