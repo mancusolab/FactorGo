@@ -23,7 +23,7 @@
         :alt: Twitter
         :target: https://twitter.com/factorgo
 
-|Maintenance yes| |Star| |MIT license| |PyScaffold|
+|Maintenance yes| |Star| |Data| |MIT license| |PyScaffold|
 
 .. |PyScaffold| image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
     :alt: Project generated with PyScaffold
@@ -38,6 +38,9 @@
 
 .. |MIT license| image:: https://img.shields.io/badge/License-MIT-blue.svg
    :target: https://lbesson.mit-license.org/
+
+.. |Data| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.7765048.svg
+   :target: https://doi.org/10.5281/zenodo.7765048
 
 =======
 FactorGo
