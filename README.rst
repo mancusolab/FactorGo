@@ -30,7 +30,7 @@
     :target: https://pyscaffold.org/
 
 .. |Maintenance yes| image:: https://img.shields.io/badge/Maintained%3F-yes-green.svg
-   :target: https://GitHub.com/Naereen/StrapDown.js/graphs/commit-activity
+   :target: https://github.com/mancusolab/FactorGo/pulse
 
 .. |Star| image:: https://img.shields.io/github/stars/mancusolab/factorgo?style=social
         :alt: Github
