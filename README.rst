@@ -44,7 +44,7 @@ For preprint, please see:
 
     | TBD
 
-|Model|_ | |Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_
+|Model|_ | |Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_ | |Other Softwares|_
 
 =================
 
@@ -135,6 +135,7 @@ The output contains five result files:
 3. demo_test.Wvar.tsv.gz:  posterior variance of loading matrix W (kx1)
 4. demo_test.Zvar.tsv.gz:  posterior variance of factor score Z (nxk)
 5. demo_test.factor.tsv.gz:  contains the following three columns
+
    | a) factor index (ordered by R2),
    | b) posterior mean of ARD precision parameters,
    | c) variance explained by each factor (R2)
@@ -158,7 +159,7 @@ for example:
         -p gpu \ # use gpu device
         -o ./example/result/demo_test
         
-``factorgo`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install SuShiE using ``pip`` in the desired environment.
+``factorgo`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install ``factorgo`` using ``pip`` in the desired environment.
 
 .. _References:
 .. |References| replace:: **References**
@@ -175,6 +176,23 @@ Support
 =======
 Please report any bugs or feature requests in the `Issue Tracker <https://github.com/mancusolab/FactorGo/issues>`_.
 If you have any questions or comments please contact zzhang39@usc.edu and/or nmancuso@usc.edu.
+
+
+.. _OtherSoftwares:
+.. |Other Softwares| replace:: **Other Softwares**
+
+Other Softwares
+==============
+
+Please check out other software developed by `Mancuso Lab <https://www.mancusolab.com/>`_ and more to come:
+
+* `SuShiE <https://github.com/mancusolab/sushie>`_: a Python software to fine-map causal SNPs, compute prediction weights, and infer effect size correlation across multiple ancestries.
+
+* `MA-FOCUS <https://github.com/mancusolab/ma-focus>`_: a Bayesian fine-mapping framework using `TWAS <https://www.nature.com/articles/ng.3506>`_ statistics across multiple ancestries to identify the causal genes for complex traits.
+
+* `SuSiE-PCA <https://github.com/mancusolab/sushie>`_: a scalable Bayesian variable selection technique for sparse principal component analysis
+
+* `twas_sim <https://github.com/mancusolab/twas_sim>`_: a Python software to simulate `TWAS <https://www.nature.com/articles/ng.3506>`_ statistics.
 
 .. _pyscaffold-notes:
 
