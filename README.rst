@@ -119,6 +119,8 @@ To run ``factorgo`` command line tool, we specify the following input files and 
 * --scale: the snp columns of Zscore matrix is center and standardized
 * -o: output directory and prefix
 
+For all available flags, please use ``factorgo -h``.
+
 .. code-block:: bash
 
    factorgo \
