@@ -55,6 +55,8 @@ please see example below and full documentation.
 
 For preprint, please see: 
 
+    | A scalable variational approach to characterize pleiotropic components across thousands of human diseases and complex traits using GWAS summary statistics
+    | Zixuan Zhang, Junghyun Jung, Artem Kim, Noah Suboc, Steven Gazal, Nicholas Mancuso
     | https://www.medrxiv.org/content/10.1101/2023.03.27.23287801v1
 
 |Model|_ | |Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_ | |Other Softwares|_
