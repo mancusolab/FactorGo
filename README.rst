@@ -53,11 +53,11 @@ via `JAX <https://github.com/google/jax>`_ in python, which generates and compil
 C++ code in real time and operates seamlessly on CPU, GPU or TPU. FactorGo is a command line tool and
 please see example below and full documentation.
 
-For preprint, please see: 
+For pubished paper, please see:
 
     | A scalable variational approach to characterize pleiotropic components across thousands of human diseases and complex traits using GWAS summary statistics
     | Zixuan Zhang, Junghyun Jung, Artem Kim, Noah Suboc, Steven Gazal, Nicholas Mancuso
-    | https://www.medrxiv.org/content/10.1101/2023.03.27.23287801v1
+    | https://www.cell.com/ajhg/abstract/S0002-9297(23)00353-1
 
 |Model|_ | |Installation|_ | |Example|_ | |Notes|_ | |References|_ | |Support|_ | |Other Softwares|_
 
@@ -163,7 +163,7 @@ The output contains five result files:
 
 Notes
 =====
-The default computation device for ``factorgo`` is CPU. To switch to GPU device, you can specify the platform (cpu/gpu/tpu) using the flag `-p gpu` 
+The default computation device for ``factorgo`` is CPU. To switch to GPU device, you can specify the platform (cpu/gpu/tpu) using the flag `-p gpu`
 for example:
 
 .. code-block:: bash
@@ -175,7 +175,7 @@ for example:
         --scale \
         -p gpu \ # use gpu device
         -o ./example/result/demo_test
-        
+
 ``factorgo`` uses `JAX <https://github.com/google/jax>`_ with `Just In Time  <https://jax.readthedocs.io/en/latest/jax-101/02-jitting.html>`_ compilation to achieve high-speed computation. However, there are some `issues <https://github.com/google/jax/issues/5501>`_ for JAX with Mac M1 chip. To solve this, users need to initiate conda using `miniforge <https://github.com/conda-forge/miniforge>`_, and then install ``factorgo`` using ``pip`` in the desired environment.
 
 .. _References:
