@@ -17,6 +17,8 @@ For pubished paper, please see:
 Zhang, Z., Jung, J., Kim, A., Suboc, N., Gazal, S., and Mancuso, N. (2023). A scalable approach to characterize pleiotropy across thousands of human diseases and complex traits using GWAS summary statistics. _Am. J. Hum. Genet._ 110, 1863–1874.
 (https://www.cell.com/ajhg/abstract/S0002-9297(23)00353-1)
 
+We are currently working on more detailed documentations. Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis. I am happy to schedule zoom call if needed.
+
 [**Installation**](#installation)
 | [**Example**](#example)
 | [**Notes**](#notes)
