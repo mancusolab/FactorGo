@@ -1,5 +1,5 @@
-[![PyPI-Server](https://img.shields.io/pypi/v/traceax.svg)](https://pypi.org/project/traceax/)
-[![Github](https://img.shields.io/github/stars/mancusolab/traceax?style=social)](https://github.com/mancusolab/traceax)
+[![PyPI-Server](https://img.shields.io/pypi/v/factorgo.svg)](https://pypi.org/project/factorgo/)
+[![Github](https://img.shields.io/github/stars/mancusolab/factorgo?style=social)](https://github.com/mancusolab/factorgo)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # FactorGo
