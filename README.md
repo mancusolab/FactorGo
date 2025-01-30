@@ -73,7 +73,7 @@ pip install .
 ```
 
 ## Example
-For iilustration, we use example data stored in `/example/data`,
+For illustration, we use example data stored in `/example/data`,
 including Z score summary statistics file and sample size file.
 
 To run ``factorgo`` command line tool, we specify the following input files and flags:
